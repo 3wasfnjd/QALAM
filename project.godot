@@ -34,3 +34,14 @@ openxr/extensions/meta/passthrough=true
 openxr/extensions/meta/anchor_api=false
 openxr/extensions/meta/scene_api=false
 shaders/enabled=true
+
+[shader_globals]
+
+qalam_wave_center={
+"type": "vec3",
+"value": Vector3(0, -100, 0)
+}
+qalam_wave_radius={
+"type": "float",
+"value": 0.0
+}

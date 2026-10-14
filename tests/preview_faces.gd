@@ -25,16 +25,19 @@ func _run() -> void:
 	var faces := [0, 1, 2, 3, 4, 5]
 	var heroes: Array = []
 	for i in range(6):
-		var h := PencilHero.new()
+		var h := PencilRig.new()
 		root.add_child(h)
 		h.position = Vector3((i - 2.5) * 0.42, 0, 0)
 		h.rotation.y = PI
 		heroes.append(h)
 	await process_frame
 	for i in range(6):
-		heroes[i].set_face(faces[i], 10.0)
+		heroes[i].set_face(faces[i])
 		heroes[i].rotation.y = PI + (i - 2.5) * 0.12
-	for k in range(5):
+	var anims := [&"idle", &"tired_idle", &"celebrate", &"lose_balance", &"sad", &"push"]
+	for i in range(6):
+		heroes[i].play(anims[i])
+	for k in range(20):
 		await process_frame
 	await RenderingServer.frame_post_draw
 	get_root().get_texture().get_image().save_png("res://build/previews/hero_faces.png")

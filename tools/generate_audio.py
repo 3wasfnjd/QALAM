@@ -74,6 +74,42 @@ write('gate', [nz[i] * 2.0 * math.exp(-i / RATE * 3) + sum(pluck(note(n), max(0,
 write('win', render(2.2, lambda t, u: sum(pluck(note(n), max(0, t - d), 2.2) * (t >= d) for n, d in [(67, 0), (72, 0.15), (76, 0.3), (79, 0.45), (84, 0.7), (88, 0.85), (91, 1.0)]) * 0.35))
 
 
+# --- stage one cues ---------------------------------------------------------------------
+nz = lowpass(noise('rumble', int(RATE * 1.4)), 0.03)
+write('rumble', [nz[i] * 3.0 * math.sin(math.pi * i / len(nz)) * (0.6 + 0.4 * math.sin(math.tau * 9 * i / RATE)) for i in range(len(nz))])
+nz = lowpass(noise('dust', int(RATE * 1.2)), 0.08)
+write('dust', [nz[i] * 1.6 * math.sin(math.pi * min(1, i / (RATE * 0.1))) * math.exp(-i / RATE * 2.5) for i in range(len(nz))])
+nz = noise('emerge', int(RATE * 1.0))
+hp = [nz[i] - nz[i - 1] for i in range(len(nz))]
+write('emerge', [hp[i] * 0.3 * abs(math.sin(math.tau * 5 * i / RATE)) * min(1, i / (RATE * 0.2)) + pluck(note(64 + 5 * int(i / RATE * 4)), (i / RATE) % 0.25, 8) * 0.15 for i in range(len(nz))])
+nz = noise('scrin', int(RATE * 0.5))
+hp = [nz[i] - nz[i - 1] for i in range(len(nz))]
+write('scribble_in', [hp[i] * 0.45 * abs(math.sin(math.tau * 14 * i / RATE)) * (i / len(hp)) for i in range(len(hp))])
+nz = noise('line', int(RATE * 0.45))
+hp = [nz[i] - nz[i - 1] for i in range(len(nz))]
+write('pencil_line', [hp[i] * 0.25 * (1 - i / len(hp)) + pluck(note(67), i / RATE, 6) * 0.35 + pluck(note(74), max(0, i / RATE - 0.08), 6) * 0.3 * (i / RATE > 0.08) for i in range(len(hp))])
+nz = noise('crumble', int(RATE * 0.5))
+r = random.Random('crb')
+env = lowpass([1.0 if r.random() < 0.05 else 0.0 for _ in nz], 0.03)
+write('crumble', [nz[i] * env[i] * 7.0 * (1 - i / len(nz)) for i in range(len(nz))])
+nz = noise('rub', RATE)
+hp = lowpass([nz[i] - nz[i - 1] for i in range(len(nz))], 0.5)
+write('rub', [hp[i] * 0.8 * (0.5 + 0.5 * abs(math.sin(math.tau * 7 * i / RATE))) for i in range(len(hp))])
+write('dry', render(0.25, lambda t, u: math.sin(math.tau * (300 - 120 * u) * t) * (1 - u) * 0.4 + random.Random(int(t * 9000)).uniform(-0.1, 0.1) * (1 - u)))
+write('wobble', render(0.5, lambda t, u: math.sin(math.tau * 180 * t + 4 * math.sin(math.tau * 9 * t)) * (1 - u) ** 2 * 0.5))
+write('drop', render(0.7, lambda t, u: (pluck(note(84), t, 5) + pluck(note(91), max(0, t - 0.07), 5) * (t > 0.07)) * 0.5))
+write('absorb', render(0.6, lambda t, u: math.sin(math.tau * (400 + 600 * u) * t) * math.sin(math.pi * u) * 0.35))
+write('bloom', render(1.4, lambda t, u: sum(pluck(note(n), max(0, t - d), 3) * (t >= d) for n, d in [(72, 0), (76, 0.1), (79, 0.2), (83, 0.3), (84, 0.45)]) * 0.4))
+nz = noise('click', int(RATE * 0.3))
+write('click', [nz[i] * 0.6 * math.exp(-i / RATE * 120) + math.sin(math.tau * 220 * i / RATE) * 0.4 * math.exp(-i / RATE * 20) for i in range(len(nz))])
+write('orb', render(2.0, lambda t, u: sum(pluck(note(n), t, 1.2) for n in (67, 71, 74, 79)) * 0.2 * min(1, t * 5)))
+write('restore', render(3.0, lambda t, u: sum(math.sin(math.tau * note(n) * t) * math.sin(math.pi * u) for n in (60, 64, 67, 72, 76)) * 0.12 + sum(pluck(note(n), max(0, t - d), 2.5) * (t >= d) for n, d in [(79, 0.4), (84, 0.9), (88, 1.4), (91, 1.9)]) * 0.25))
+nz = lowpass(noise('wind', int(RATE * 2.5)), 0.06)
+write('wind', [nz[i] * 2.4 * math.sin(math.pi * i / len(nz)) * (0.7 + 0.3 * math.sin(math.tau * 0.8 * i / RATE)) for i in range(len(nz))])
+nz = lowpass(noise('flip', int(RATE * 0.8)), 0.2)
+write('page_flip', [nz[i] * 1.5 * math.sin(math.pi * i / len(nz)) ** 0.5 * (1.0 + 0.5 * math.sin(math.tau * 3 * i / RATE)) for i in range(len(nz))])
+
+
 # --- music: soft music-box loops ----------------------------------------------------
 def music(name, bpm, chords, melody, seed, warm):
     beat = 60.0 / bpm

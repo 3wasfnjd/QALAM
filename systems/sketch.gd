@@ -24,19 +24,27 @@ uniform float life : hint_range(0.0, 1.0) = 1.0;
 uniform float grain = 0.07;
 uniform float glow = 0.0;
 uniform vec4 glow_color : source_color = vec4(1.0, 0.85, 0.4, 1.0);
+uniform float wave_mask = 1.0;
+global uniform vec3 qalam_wave_center;
+global uniform float qalam_wave_radius;
 varying vec3 wpos;
 float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
+	float d = distance(wpos, qalam_wave_center);
+	float wave = qalam_wave_radius > 0.001 ? smoothstep(qalam_wave_radius, qalam_wave_radius - 0.08, d) * wave_mask : 0.0;
+	float rim = qalam_wave_radius > 0.001 ? smoothstep(0.05, 0.0, abs(d - qalam_wave_radius)) * wave_mask : 0.0;
+	float alive = max(life, wave);
 	vec3 c = albedo.rgb;
 	float g = dot(c, vec3(0.299, 0.587, 0.114));
 	vec3 sketch = vec3(0.70, 0.68, 0.64) * (0.45 + 0.65 * g);
-	c = mix(sketch, c, life);
+	c = mix(vec3(g), c, 0.85);               // never fully saturated: storybook
+	c = mix(sketch, c, alive);
 	float n = hash(floor(wpos * 900.0));
 	float streak = sin((wpos.x + wpos.y * 0.7 + wpos.z * 1.3) * 420.0) * 0.5 + 0.5;
-	c *= 1.0 - grain * n - grain * 0.6 * streak * (1.0 - life);
+	c *= 1.0 - grain * n - grain * 0.6 * streak * (1.0 - alive);
 	ALBEDO = c;
-	EMISSION = glow_color.rgb * glow;
+	EMISSION = glow_color.rgb * glow + vec3(0.9, 1.0, 0.55) * rim * 0.8;
 }
 """
 
@@ -52,6 +60,26 @@ void fragment() {
 """
 
 static var _paper_shader: Shader
+static var _globals_ready: bool = false
+
+
+## The colour wave (centre + radius, world space) is a global shader value so
+## every paper surface can bloom back to life as it passes.
+static func ensure_globals() -> void:
+	if _globals_ready:
+		return
+	_globals_ready = true
+	var names := RenderingServer.global_shader_parameter_get_list()
+	if not names.has(&"qalam_wave_center"):
+		RenderingServer.global_shader_parameter_add(&"qalam_wave_center", RenderingServer.GLOBAL_VAR_TYPE_VEC3, Vector3(0, -100, 0))
+	if not names.has(&"qalam_wave_radius"):
+		RenderingServer.global_shader_parameter_add(&"qalam_wave_radius", RenderingServer.GLOBAL_VAR_TYPE_FLOAT, 0.0)
+
+
+static func set_wave(center: Vector3, radius: float) -> void:
+	ensure_globals()
+	RenderingServer.global_shader_parameter_set(&"qalam_wave_center", center)
+	RenderingServer.global_shader_parameter_set(&"qalam_wave_radius", radius)
 static var _ink_shader: Shader
 
 
@@ -59,6 +87,7 @@ static var _ink_shader: Shader
 ## that zone's colour back later; zone -1 means always in full colour.
 static func paper(color: Color, zone: int = -1, zones: Dictionary = {}) -> ShaderMaterial:
 	if _paper_shader == null:
+		ensure_globals()
 		_paper_shader = Shader.new()
 		_paper_shader.code = PAPER_SHADER
 	var m := ShaderMaterial.new()

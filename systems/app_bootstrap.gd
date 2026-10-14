@@ -77,8 +77,8 @@ func _ready() -> void:
 	if preview:
 		environment.background_color = Color(0.36, 0.34, 0.31, 1.0)
 		get_viewport().transparent_bg = false
-		head.position = Vector3(0, 1.32, 0.02)
-		head.rotation_degrees.x = -38.0
+		head.position = Vector3(0, 1.2, -0.04)
+		head.rotation_degrees.x = -36.0
 		aim_controllers[0].position = Vector3(-0.36, 1.0, -0.12)
 		aim_controllers[0].rotation_degrees = Vector3(-35, 10, 0)
 		aim_controllers[1].position = Vector3(0.36, 1.0, -0.12)
@@ -149,17 +149,19 @@ func _process(delta: float) -> void:
 	if not started or not ready:
 		return
 	var triggers := [0.0, 0.0]
+	var grips := [0.0, 0.0]
 	var stick := Vector2.ZERO
 	if preview:
 		stick = _preview_input(delta, triggers)
 	else:
 		for i in range(2):
 			triggers[i] = controllers[i].get_float("trigger")
+			grips[i] = controllers[i].get_float("grip")
 			aim_controllers[i].visible = controllers[i].get_is_active()
 		var left := controllers[0].get_vector2("thumbstick")
 		var right := controllers[1].get_vector2("thumbstick")
 		stick = left if left.length() >= right.length() else right
-	world.tick(delta, stick, triggers)
+	world.tick(delta, stick, triggers, grips)
 
 
 func _button(action: StringName, hand_index: int) -> void:
@@ -178,58 +180,117 @@ func _recenter() -> void:
 	studio.look_at(head.global_position, Vector3.UP, true)
 
 
-## Scripted desktop demo through the real game code: place the book, watch it
-## open, draw a bridge, cross, push the ball onto the plate, reach the star.
-func _preview_input(delta: float, triggers: Array) -> Vector2:
-	preview_time += delta
-	var t := preview_time
+## Scripted desktop demo through the real game code (flat screenshots for
+## CI; they prove nothing about the headset): placing, the intro, drawing,
+## the colour drop, erasing, the ramp and ball, the gate, stairs, the ending.
+var _pv_step: int = 0
+var _pv_t: float = 0.0
+var _pv_steps: Array = []
+
+
+func _preview_input(delta: float, _triggers: Array) -> Vector2:
+	if _pv_steps.is_empty():
+		_pv_steps = _preview_plan()
+	_pv_t += delta
 	var stick := Vector2.ZERO
-	var hero := world.hero
-	if t > 0.6 and world.phase == BookWorld.Phase.PLACING:
-		world.place_here()
-	if t > 5.0 and t - delta <= 5.0:
-		hero.reset_to(Vector3(-1.95, 1.0, 0.2))
-		var pts := PackedVector3Array()
-		for k in range(12):
-			var u := k / 11.0
-			pts.append(Vector3(lerpf(-1.65, 0.0, u), 1.15 + sin(u * PI) * 0.1, 0.2 + sin(u * 5.0) * 0.03))
-		world._stroke_points[1] = pts
-		Sketch.build_tube(world._stroke_meshes[1], pts, 0.045, 5)
-		world.pens[1].drawing = true
-		aim_controllers[1].global_position = world.page.to_global(pts[pts.size() - 1]) + Vector3(0.02, 0.0, 0.12)
-	if t > 5.8 and t - delta <= 5.8:
-		world._stroke_points[1] = PackedVector3Array()
-		world._stroke_meshes[1].clear_surfaces()
-		world.pens[1].drawing = false
-		world.try_bridge(Vector3(-1.65, 1.1, 0.2), Vector3(0.85, 1.1, 0.2))
-	if t > 6.0 and t < 7.0:
-		stick = Vector2(1, 0)
-	if t > 7.4 and t - delta <= 7.4:
-		var ball_p := world.level.ball_start
-		var d := Vector2(world.level.plate.x - ball_p.x, world.level.plate.z - ball_p.z).normalized()
-		hero.reset_to(Vector3(ball_p.x - d.x * 0.6, 1.0, ball_p.z - d.y * 0.6))
-	if t > 7.4 and t < 9.2 and not world.gate_restored:
-		var to_plate := Vector2(world.level.plate.x - world.ball.position.x, world.level.plate.z - world.ball.position.z).normalized()
-		stick = Vector2(to_plate.x, -to_plate.y)  # page +z is toward the camera
-	if t > 9.6 and t - delta <= 9.6:
-		hero.reset_to(Vector3(2.8, 2.0, -0.85))
-	if t > 9.8 and t < 11.5:
-		stick = Vector2(1, 0)
-	var shots := [[0.4, "placing"], [2.3, "opening"], [4.7, "start"], [5.5, "drawing"], [6.6, "bridge"], [8.0, "push"], [9.4, "gate"], [11.0, "goal"], [12.6, "win"], [14.0, "replay"]]
-	if preview_shots < shots.size() and t >= shots[preview_shots][0]:
-		var shot_name: String = shots[preview_shots][1]
-		preview_shots += 1
-		_capture(shot_name)
+	if _pv_step >= _pv_steps.size():
+		get_tree().quit()
+		return stick
+	var step: Dictionary = _pv_steps[_pv_step]
+	if step.has("stick"):
+		stick = step.stick
+	if step.has("until") and not (step.until as Callable).call():
+		if _pv_t < step.get("max", 20.0):
+			return stick
+	elif _pv_t < step.get("t", 0.0):
+		return stick
+	if step.has("then"):
+		(step.then as Callable).call()
+	if step.has("shot"):
+		_capture(step.shot)
+	_pv_step += 1
+	_pv_t = 0.0
 	return stick
+
+
+func _preview_plan() -> Array:
+	var w := world
+	var P := BookWorld.Phase
+	return [
+		{"t": 0.5, "shot": "01_placing"},
+		{"t": 0.2, "then": func(): w.place_here()},
+		{"t": 0.8, "shot": "02_shake"},
+		{"t": 1.6, "shot": "03_opening_dust"},
+		{"t": 1.6, "shot": "04_popup"},
+		{"until": func(): return w._intro_beats_queued, "max": 4.0, "shot": "05_emerge"},
+		{"t": 4.0, "shot": "06_look_tree"},
+		{"until": func(): return w.phase == P.PLAYING, "max": 30.0},
+		{"t": 0.3, "shot": "07_points_across"},
+		{"t": 0.2, "then": func():
+			var pts := PackedVector3Array()
+			for k in range(14):
+				var u := k / 13.0
+				pts.append(Vector3(lerpf(-3.55, -2.4, u), 1.12 + sin(u * PI) * 0.12, 1.6 + sin(u * 4.0) * 0.05))
+			w._strokes[1] = pts
+			Sketch.build_tube(w._stroke_meshes[1], pts, 0.05, 5)
+			w.pens[1].drawing = true
+			aim_controllers[1].global_position = w.page.to_global(pts[pts.size() - 1]) + Vector3(0.02, 0.0, 0.14), "shot": "08_drawing"},
+		{"t": 0.3, "then": func():
+			w._strokes[1] = PackedVector3Array()
+			w._stroke_meshes[1].clear_surfaces()
+			w.pens[1].drawing = false
+			var raw := PackedVector3Array()
+			for k in range(20):
+				var u := k / 19.0
+				raw.append(Vector3(lerpf(-3.55, -1.65, u), 1.08 + sin(u * PI) * 0.1, 1.6 + sin(u * 4.0) * 0.05))
+			w.commit_path(raw)},
+		{"t": 1.6, "shot": "09_careful_step"},
+		{"until": func(): return not w.hero.scripted(), "max": 6.0},
+		{"until": func(): return w.light_taken, "max": 8.0, "stick": Vector2(1, 0)},
+		{"t": 0.6, "shot": "10_colour_drop"},
+		{"t": 2.0, "shot": "11_flower_blooms"},
+		{"until": func(): return w.hero.position.x > -0.3, "max": 6.0, "stick": Vector2(1, 0)},
+		{"t": 2.6, "shot": "12_erase_hint"},
+		{"t": 0.1, "then": func():
+			var id: String = w.level.paths[0].id
+			(w.paths[id] as PathView).erase_amount = 0.6
+			(w.paths[id] as PathView).targeted = true, "shot": "13_erasing"},
+		{"t": 0.3, "then": func(): w.erase_path(w.level.paths[0].id)},
+		{"t": 0.8, "then": func():
+			var raw := PackedVector3Array()
+			for k in range(24):
+				var u := k / 23.0
+				var x := lerpf(-1.0, 1.8, u)
+				raw.append(Vector3(x, lerpf(2.2, 1.0, smoothstep(0.0, 1.0, u)), -1.15 - u * 0.1))
+			w.commit_path(raw), "shot": "14_ramp_drawn"},
+		{"t": 1.0, "shot": "15_ball_rolls"},
+		{"until": func(): return w.ball_caught, "max": 5.0},
+		{"t": 1.8, "shot": "16_gate_opens"},
+		{"t": 0.2, "then": func():
+			w.erase_path(w.level.paths[0].id)
+			w.hero.reset_to(Vector3(2.05, 1.0, 2.0))
+			var raw := PackedVector3Array()
+			for k in range(16):
+				var u := k / 15.0
+				raw.append(Vector3(lerpf(2.1, 3.95, u), lerpf(1.0, 1.5, u) + sin(u * PI) * 0.1, 2.0))
+			w.commit_path(raw)},
+		{"t": 1.2, "stick": Vector2(1, 0), "shot": "17_stairs"},
+		{"t": 0.1, "then": func():
+			w.hero.reset_to(Vector3(4.0, 2.5, -2.8))},
+		{"until": func(): return w.phase == P.ENDING, "max": 4.0, "stick": Vector2(1, 0)},
+		{"t": 1.4, "shot": "18_holds_orb"},
+		{"t": 3.0, "shot": "19_colour_wave"},
+		{"t": 3.0, "shot": "20_life_returns"},
+		{"t": 1.6, "shot": "21_next_page"},
+		{"t": 4.0, "shot": "22_page_two"},
+	]
 
 
 func _capture(shot_name: String) -> void:
 	await RenderingServer.frame_post_draw
 	DirAccess.make_dir_recursive_absolute("res://build/previews")
 	get_viewport().get_texture().get_image().save_png("res://build/previews/%s.png" % shot_name)
-	print("preview shot %s: phase=%d hero=%s ball=%s gate=%s bridges=%d" % [shot_name, world.phase, str(world.hero.position.snapped(Vector3.ONE * 0.01)), str(world.ball.position.snapped(Vector3.ONE * 0.01)), str(world.gate_restored), world.bridges.size()])
-	if preview_shots >= 10:
-		get_tree().quit()
+	print("preview shot %s: phase=%d hero=%s ink=%.2f paths=%d ball=%s caught=%s" % [shot_name, world.phase, str(world.hero.position.snapped(Vector3.ONE * 0.01)), world.level.ink, world.level.paths.size(), str(world.ball.position.snapped(Vector3.ONE * 0.01)), str(world.ball_caught)])
 
 
 func _stop(message: String) -> void:
