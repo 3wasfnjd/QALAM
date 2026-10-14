@@ -1,0 +1,85 @@
+name: QALAM Quest APK
+on:
+  push:
+    branches: ['qalam/**']
+    paths-ignore: ['docs/**', 'assets/models/original/**']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: qalam-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 12266719
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned Android tools
+        run: sdkmanager 'platforms;android-36' 'platforms;android-34' 'build-tools;36.1.0' 'ndk;29.0.14206865'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: shadda-development-signing-v1
+      - name: Create development signing key when absent
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -noprompt -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=SHADDA Development,O=ABODEN GAMES,C=SA'
+          fi
+      - name: Install verified Godot and OpenXR Vendors
+        run: python3 tools/setup_ci.py
+      - name: Import actual game resources
+        # A fresh first import occasionally aborts at exit (after finishing); a second pass settles it.
+        run: godot --headless --xr-mode off --path . --import || godot --headless --xr-mode off --path . --import
+      - name: Verify native Meta extension registration
+        run: godot --headless --xr-mode off --path . --script tests/test_meta_extension.gd
+      - name: Test intro timing and focus interruption
+        run: godot --headless --xr-mode off --path . --script tests/test_intro.gd
+      - name: Test page one headless (collision, strokes, ink, respawn, full solve, replay)
+        run: godot --headless --xr-mode off --audio-driver Dummy --path . --script tests/test_page.gd
+      - name: Capture in-engine desktop previews (not a Quest capture)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb libgl1-mesa-dri
+          timeout 150 xvfb-run -a -s "-screen 0 1280x720x24" godot --path . --xr-mode off --audio-driver Dummy --rendering-method gl_compatibility -- --preview
+          timeout 60 xvfb-run -a -s "-screen 0 1280x720x24" godot --path . --xr-mode off --audio-driver Dummy --rendering-method gl_compatibility --script tests/preview_faces.gd
+          ls -l build/previews
+      - name: Export native ARM64 Android APK
+        run: godot --headless --xr-mode off --path . --install-android-build-template --export-debug Quest build/QALAM-Quest-AR-v0.1.0.apk
+      - name: Verify manifest, ABI, splash, and certificate
+        run: python3 tools/verify_apk.py
+      - name: Publish package report as a check annotation
+        run: |
+          echo "::notice title=package-report::$(python3 -c 'import json;print(json.dumps(json.load(open("build/package-report.json"))))')"
+          echo "::notice title=apk-sha256::$(cat build/QALAM-Quest-AR-v0.1.0.apk.sha256)"
+      - name: Publish APK as a GitHub pre-release (direct download, GitHub only — never Meta)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="qalam-v0.1.0"
+          NOTES="بناء آلي من ${GITHUB_SHA}. تم البناء وفحص الحزمة ونجاح الاختبارات الآلية فقط؛ لم يُثبّت أو يُختبر على Quest. توقيع تطويري."
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --notes "$NOTES" --prerelease
+          else
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "القلم QALAM v0.1.0 — تجربة اللعب" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber build/QALAM-Quest-AR-v0.1.0.apk build/QALAM-Quest-AR-v0.1.0.apk.sha256 build/package-report.json build/versions.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: QALAM-Quest-AR-v0.1.0-build
+          path: build/
+          if-no-files-found: error
+          retention-days: 14

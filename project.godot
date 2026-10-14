@@ -1,0 +1,36 @@
+config_version=5
+
+[application]
+config/name="QALAM"
+config/icon="res://assets/ui/icon.png"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+boot_splash/image="res://assets/ui/studio.png"
+boot_splash/bg_color=Color(0,0,0,0)
+boot_splash/show_image=true
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/per_pixel_transparency/allowed=true
+
+[rendering]
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0,0,0,0)
+anti_aliasing/quality/msaa_3d=1
+
+[physics]
+3d/physics_engine="Jolt Physics"
+common/physics_ticks_per_second=90
+
+[xr]
+openxr/enabled=true
+openxr/reference_space=1
+openxr/default_action_map="res://config/openxr_action_map.tres"
+openxr/environment_blend_mode=2
+openxr/extensions/meta/passthrough=true
+openxr/extensions/meta/anchor_api=false
+openxr/extensions/meta/scene_api=false
+shaders/enabled=true
