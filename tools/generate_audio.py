@@ -1,140 +1,266 @@
-"""Original deterministic sounds and music for QALAM, CC0. Pure synthesis."""
-import math, pathlib, random, struct, wave
+"""Original sound and music for QALAM, CC0. Pure synthesis (numpy/scipy), no samples.
+
+Design goals after play feedback ("the music is annoying"):
+- music is slow, sparse and soft: warm pads, felt piano, a hint of music box,
+  long reverb, nothing shrill, long loops (~70 s) so repetition is not noticed;
+- effects are short, rounded (no hard clicks), low-passed and quiet.
+Music is written as OGG Vorbis (ffmpeg), effects as 22 kHz mono WAV.
+"""
+import pathlib, subprocess, wave
+import numpy as np
+from scipy import signal
 
 OUT = pathlib.Path(__file__).resolve().parents[1] / 'assets/audio'
 OUT.mkdir(parents=True, exist_ok=True)
-RATE = 22050
-
-
-def write(name, samples):
-    peak = max(1e-6, max(abs(x) for x in samples))
-    gain = min(1.0, 0.85 / peak)
-    with wave.open(str(OUT / (name + '.wav')), 'wb') as w:
-        w.setparams((1, 2, RATE, 0, 'NONE', 'not compressed'))
-        w.writeframes(b''.join(struct.pack('<h', int(32767 * max(-1, min(1, x * gain)))) for x in samples))
-
-
-def render(seconds, fn):
-    n = int(RATE * seconds)
-    return [fn(i / RATE, i / n) for i in range(n)]
-
-
-def lowpass(xs, k):
-    out, y = [], 0.0
-    for x in xs:
-        y += k * (x - y)
-        out.append(y)
-    return out
-
-
-def noise(seed, n):
-    r = random.Random(seed)
-    return [r.uniform(-1, 1) for _ in range(n)]
+SR = 22050
+MSR = 32000
 
 
 def note(n):
     return 440.0 * 2 ** ((n - 69) / 12.0)
 
 
-def pluck(f, t, decay=6.0):
-    return (math.sin(math.tau * f * t) + 0.3 * math.sin(math.tau * 2 * f * t) + 0.1 * math.sin(math.tau * 3 * f * t)) * math.exp(-t * decay)
+def t_axis(seconds, sr=SR):
+    return np.arange(int(seconds * sr)) / sr
 
 
-# --- cues -------------------------------------------------------------------------
-# Pencil scribble loop: band-limited noise with stroke-rate wobble (seamless 1 s).
-nz = noise('scribble', RATE)
-hp = [nz[i] - nz[i - 1] for i in range(len(nz))]
-write('scribble', [hp[i] * 0.4 * (0.55 + 0.45 * abs(math.sin(math.tau * 6 * i / RATE))) for i in range(len(hp))])
-
-write('jump', render(0.22, lambda t, u: math.sin(math.tau * (320 + 520 * u) * t) * (1 - u) ** 1.5 * 0.6))
-nz = noise('land', int(RATE * 0.12))
-write('land', [nz[i] * 0.5 * math.exp(-i / RATE * 40) + math.sin(math.tau * 110 * i / RATE) * 0.5 * math.exp(-i / RATE * 30) for i in range(len(nz))])
-nz = noise('step', int(RATE * 0.05))
-write('step', [nz[i] * 0.4 * math.exp(-i / RATE * 90) for i in range(len(nz))])
-nz = lowpass(noise('poof', int(RATE * 0.5)), 0.25)
-write('poof', [nz[i] * math.sin(math.pi * min(1, i / (RATE * 0.03))) * math.exp(-i / RATE * 7) for i in range(len(nz))])
-write('pop', render(0.12, lambda t, u: math.sin(math.tau * (700 - 400 * u) * t) * (1 - u) ** 2))
-nz = noise('paper', int(RATE * 0.2))
-write('paper_pop', [nz[i] * 0.5 * math.exp(-i / RATE * 25) + pluck(520, i / RATE, 18) * 0.4 for i in range(len(nz))])
-nz = noise('crumple', int(RATE * 0.3))
-r = random.Random('cr')
-env = [1.0 if r.random() < 0.08 else 0.0 for _ in nz]
-env = lowpass(env, 0.02)
-write('crumple', [nz[i] * env[i] * 6.0 * (1 - i / len(nz)) for i in range(len(nz))])
-write('bump', render(0.15, lambda t, u: math.sin(math.tau * 140 * t) * math.exp(-t * 30)))
-nz = lowpass(noise('book', int(RATE * 0.9)), 0.12)
-write('book_open', [nz[i] * math.sin(math.pi * i / len(nz)) ** 2 * 1.4 + math.sin(math.tau * 80 * i / RATE) * 0.3 * math.exp(-max(0, i / RATE - 0.75) * 30) * (i / RATE > 0.75) for i in range(len(nz))])
-write('plank', render(0.6, lambda t, u: sum(pluck(f, max(0, t - d), 14) * (t >= d) for f, d in [(392, 0), (494, 0.06), (587, 0.12), (784, 0.18)]) * 0.5))
-nz = noise('erase', int(RATE * 0.45))
-hp = [nz[i] - nz[i - 1] for i in range(len(nz))]
-write('erase', [hp[i] * 0.4 * abs(math.sin(math.tau * 9 * i / RATE)) * (1 - i / len(hp)) for i in range(len(hp))])
-write('plate', render(0.5, lambda t, u: math.sin(math.tau * 90 * t) * math.exp(-t * 25) + pluck(1046, t, 5) * 0.5))
-nz = lowpass(noise('gate', int(RATE * 1.6)), 0.05)
-write('gate', [nz[i] * 2.0 * math.exp(-i / RATE * 3) + sum(pluck(note(n), max(0, i / RATE - d), 3) * (i / RATE >= d) for n, d in [(72, 0.5), (76, 0.65), (79, 0.8), (84, 0.95)]) * 0.4 for i in range(len(nz))])
-write('win', render(2.2, lambda t, u: sum(pluck(note(n), max(0, t - d), 2.2) * (t >= d) for n, d in [(67, 0), (72, 0.15), (76, 0.3), (79, 0.45), (84, 0.7), (88, 0.85), (91, 1.0)]) * 0.35))
+def lowpass(x, hz, sr=SR, order=2):
+    sos = signal.butter(order, hz, 'low', fs=sr, output='sos')
+    return signal.sosfilt(sos, x)
 
 
-# --- stage one cues ---------------------------------------------------------------------
-nz = lowpass(noise('rumble', int(RATE * 1.4)), 0.03)
-write('rumble', [nz[i] * 3.0 * math.sin(math.pi * i / len(nz)) * (0.6 + 0.4 * math.sin(math.tau * 9 * i / RATE)) for i in range(len(nz))])
-nz = lowpass(noise('dust', int(RATE * 1.2)), 0.08)
-write('dust', [nz[i] * 1.6 * math.sin(math.pi * min(1, i / (RATE * 0.1))) * math.exp(-i / RATE * 2.5) for i in range(len(nz))])
-nz = noise('emerge', int(RATE * 1.0))
-hp = [nz[i] - nz[i - 1] for i in range(len(nz))]
-write('emerge', [hp[i] * 0.3 * abs(math.sin(math.tau * 5 * i / RATE)) * min(1, i / (RATE * 0.2)) + pluck(note(64 + 5 * int(i / RATE * 4)), (i / RATE) % 0.25, 8) * 0.15 for i in range(len(nz))])
-nz = noise('scrin', int(RATE * 0.5))
-hp = [nz[i] - nz[i - 1] for i in range(len(nz))]
-write('scribble_in', [hp[i] * 0.45 * abs(math.sin(math.tau * 14 * i / RATE)) * (i / len(hp)) for i in range(len(hp))])
-nz = noise('line', int(RATE * 0.45))
-hp = [nz[i] - nz[i - 1] for i in range(len(nz))]
-write('pencil_line', [hp[i] * 0.25 * (1 - i / len(hp)) + pluck(note(67), i / RATE, 6) * 0.35 + pluck(note(74), max(0, i / RATE - 0.08), 6) * 0.3 * (i / RATE > 0.08) for i in range(len(hp))])
-nz = noise('crumble', int(RATE * 0.5))
-r = random.Random('crb')
-env = lowpass([1.0 if r.random() < 0.05 else 0.0 for _ in nz], 0.03)
-write('crumble', [nz[i] * env[i] * 7.0 * (1 - i / len(nz)) for i in range(len(nz))])
-nz = noise('rub', RATE)
-hp = lowpass([nz[i] - nz[i - 1] for i in range(len(nz))], 0.5)
-write('rub', [hp[i] * 0.8 * (0.5 + 0.5 * abs(math.sin(math.tau * 7 * i / RATE))) for i in range(len(hp))])
-write('dry', render(0.25, lambda t, u: math.sin(math.tau * (300 - 120 * u) * t) * (1 - u) * 0.4 + random.Random(int(t * 9000)).uniform(-0.1, 0.1) * (1 - u)))
-write('wobble', render(0.5, lambda t, u: math.sin(math.tau * 180 * t + 4 * math.sin(math.tau * 9 * t)) * (1 - u) ** 2 * 0.5))
-write('drop', render(0.7, lambda t, u: (pluck(note(84), t, 5) + pluck(note(91), max(0, t - 0.07), 5) * (t > 0.07)) * 0.5))
-write('absorb', render(0.6, lambda t, u: math.sin(math.tau * (400 + 600 * u) * t) * math.sin(math.pi * u) * 0.35))
-write('bloom', render(1.4, lambda t, u: sum(pluck(note(n), max(0, t - d), 3) * (t >= d) for n, d in [(72, 0), (76, 0.1), (79, 0.2), (83, 0.3), (84, 0.45)]) * 0.4))
-nz = noise('click', int(RATE * 0.3))
-write('click', [nz[i] * 0.6 * math.exp(-i / RATE * 120) + math.sin(math.tau * 220 * i / RATE) * 0.4 * math.exp(-i / RATE * 20) for i in range(len(nz))])
-write('orb', render(2.0, lambda t, u: sum(pluck(note(n), t, 1.2) for n in (67, 71, 74, 79)) * 0.2 * min(1, t * 5)))
-write('restore', render(3.0, lambda t, u: sum(math.sin(math.tau * note(n) * t) * math.sin(math.pi * u) for n in (60, 64, 67, 72, 76)) * 0.12 + sum(pluck(note(n), max(0, t - d), 2.5) * (t >= d) for n, d in [(79, 0.4), (84, 0.9), (88, 1.4), (91, 1.9)]) * 0.25))
-nz = lowpass(noise('wind', int(RATE * 2.5)), 0.06)
-write('wind', [nz[i] * 2.4 * math.sin(math.pi * i / len(nz)) * (0.7 + 0.3 * math.sin(math.tau * 0.8 * i / RATE)) for i in range(len(nz))])
-nz = lowpass(noise('flip', int(RATE * 0.8)), 0.2)
-write('page_flip', [nz[i] * 1.5 * math.sin(math.pi * i / len(nz)) ** 0.5 * (1.0 + 0.5 * math.sin(math.tau * 3 * i / RATE)) for i in range(len(nz))])
+def highpass(x, hz, sr=SR, order=2):
+    sos = signal.butter(order, hz, 'high', fs=sr, output='sos')
+    return signal.sosfilt(sos, x)
 
 
-# --- music: soft music-box loops ----------------------------------------------------
-def music(name, bpm, chords, melody, seed, warm):
-    beat = 60.0 / bpm
-    bars = len(chords)
-    total = int(RATE * beat * 4 * bars)
-    buf = [0.0] * total
-
-    def add(start, length, fn):
-        a = int(start * RATE)
-        for i in range(int(length * RATE)):
-            j = (a + i) % total
-            buf[j] += fn(i / RATE)
-
-    for bar, root in enumerate(chords):
-        t0 = bar * 4 * beat
-        triad = [root, root + (3 if root in (57, 62, 64) else 4), root + 7]
-        for k, n in enumerate([triad[0] - 12, triad[1], triad[2], triad[1]] * 2):
-            add(t0 + k * beat / 2, beat * 2, lambda t, f=note(n): pluck(f, t, 3.0) * 0.18)
-        add(t0, beat * 4, lambda t, f=note(root - 24): math.sin(math.tau * f * t) * 0.12 * min(1, t * 4) * math.exp(-t * 0.6) * warm)
-    for k, n in enumerate(melody):
-        if n:
-            add(k * beat, beat * 2, lambda t, f=note(n): (math.sin(math.tau * f * t) + 0.25 * math.sin(math.tau * 4 * f * t)) * math.exp(-t * 3.5) * 0.22)
-    write(name, buf)
+def bandpass(x, lo, hi, sr=SR, order=2):
+    sos = signal.butter(order, [lo, hi], 'band', fs=sr, output='sos')
+    return signal.sosfilt(sos, x)
 
 
-music('music_calm', 84, [60, 57, 53, 55], [72, 0, 76, 0, 79, 0, 76, 74, 72, 0, 69, 0, 72, 0, 0, 0, 77, 0, 76, 0, 74, 0, 72, 0, 74, 0, 76, 0, 74, 0, 0, 0], 'calm', 1.0)
-music('music_bright', 104, [60, 65, 67, 60], [72, 76, 79, 84, 83, 79, 76, 79, 77, 81, 84, 81, 79, 77, 76, 74, 74, 79, 83, 86, 84, 83, 79, 77, 76, 79, 84, 79, 72, 0, 0, 0], 'bright', 0.6)
-print('QALAM audio written to', OUT)
+def noise(n, seed):
+    return np.random.default_rng(abs(hash(seed)) % (2 ** 32)).uniform(-1, 1, n)
+
+
+def fade(x, a=0.004, r=0.02, sr=SR):
+    n = len(x)
+    env = np.ones(n)
+    na, nr = max(1, int(a * sr)), max(1, int(r * sr))
+    env[:na] = np.linspace(0, 1, na) ** 2
+    env[-nr:] *= np.linspace(1, 0, nr) ** 2
+    return x * env
+
+
+def reverb(x, seconds=1.6, wet=0.25, sr=SR, seed='rv', loop=False, tone=3500):
+    n = int(seconds * sr)
+    tt = np.arange(n) / sr
+    ir = noise(n, seed) * np.exp(-tt * 6.9 / seconds)
+    ir = lowpass(ir, tone, sr)
+    ir /= np.sqrt(np.sum(ir ** 2)) + 1e-9
+    y = signal.fftconvolve(x, ir)
+    if loop:
+        tail = y[len(x):]
+        y = y[:len(x)].copy()
+        y[:len(tail)] += tail  # wrap the tail so the loop is seamless
+    else:
+        y = np.pad(y, (0, 1))[:len(x) + n]
+        x = np.concatenate([x, np.zeros(n)])
+    return x * (1 - wet) + y * wet
+
+
+def write_wav(name, x, sr=SR, peak=0.7):
+    x = np.asarray(x, dtype=np.float64)
+    m = np.max(np.abs(x)) + 1e-9
+    x = x / m * peak
+    data = (np.clip(x, -1, 1) * 32767).astype('<i2').tobytes()
+    with wave.open(str(OUT / (name + '.wav')), 'wb') as w:
+        w.setparams((1, 2, sr, 0, 'NONE', 'not compressed'))
+        w.writeframes(data)
+
+
+def write_ogg(name, x, sr=MSR, peak=0.5):
+    tmp = OUT / (name + '.tmp.wav')
+    x = np.asarray(x, dtype=np.float64)
+    x = x / (np.max(np.abs(x)) + 1e-9) * peak
+    data = (np.clip(x, -1, 1) * 32767).astype('<i2').tobytes()
+    with wave.open(str(tmp), 'wb') as w:
+        w.setparams((1, 2, sr, 0, 'NONE', 'not compressed'))
+        w.writeframes(data)
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', str(tmp), '-c:a', 'libvorbis', '-q:a', '4', str(OUT / (name + '.ogg'))], check=True)
+    tmp.unlink()
+
+
+# --- instruments ----------------------------------------------------------------------
+
+def felt_piano(f, seconds, vel, sr):
+    tt = t_axis(seconds, sr)
+    out = np.zeros_like(tt)
+    for h, (amp, dec) in enumerate([(1.0, 1.6), (0.32, 2.6), (0.12, 4.0), (0.05, 6.0)], start=1):
+        detune = 1.0 + (h - 1) * 0.0007
+        out += amp * np.sin(2 * np.pi * f * h * detune * tt) * np.exp(-tt * dec * (0.6 + f / 900.0))
+    att = np.clip(tt / 0.012, 0, 1)
+    out *= att * vel
+    # Felt hammer: a soft low thump.
+    thump = lowpass(noise(len(tt), f), 400, sr) * np.exp(-tt * 40) * 0.25 * vel
+    return lowpass(out + thump, 3200, sr)
+
+
+def music_box(f, seconds, vel, sr):
+    tt = t_axis(seconds, sr)
+    tone = np.sin(2 * np.pi * f * tt) * np.exp(-tt * 2.2) + 0.25 * np.sin(2 * np.pi * f * 4.07 * tt) * np.exp(-tt * 7)
+    return lowpass(tone * np.clip(tt / 0.004, 0, 1) * vel, 4500, sr)
+
+
+def pad(freqs, seconds, vel, sr, attack=2.5, release=2.5):
+    tt = t_axis(seconds, sr)
+    out = np.zeros_like(tt)
+    for f in freqs:
+        for det in (-0.004, 0.0, 0.0045):
+            ff = f * (1 + det)
+            for h in range(1, 5):
+                out += np.sin(2 * np.pi * ff * h * tt + h * 0.7) / (h * h)
+    out *= (1 + 0.15 * np.sin(2 * np.pi * 0.17 * tt))
+    env = np.minimum(np.clip(tt / attack, 0, 1), np.clip((seconds - tt) / release, 0, 1))
+    return lowpass(out * env * vel / len(freqs), 1400, sr)
+
+
+def render_track(chords, chord_len, melody_density, seed, bright=False):
+    sr = MSR
+    total = int(len(chords) * chord_len * sr)
+    buf = np.zeros(total)
+    rng = np.random.default_rng(seed)
+
+    def add(start, x):
+        a = int(start * sr) % total
+        end = a + len(x)
+        if end <= total:
+            buf[a:end] += x
+        else:
+            k = total - a
+            buf[a:] += x[:k]
+            buf[:end - total] += x[k:]
+
+    for i, chord in enumerate(chords):
+        t0 = i * chord_len
+        add(t0 - 1.0, pad([note(n) for n in chord], chord_len + 2.0, 0.55, sr))
+        add(t0, felt_piano(note(chord[0] - 12), 5.0, 0.35, sr))
+        # Sparse melody from chord tones (and a gentle passing note).
+        tones = sorted({n + 12 for n in chord} | {n + 24 for n in chord[:2]})
+        tones = [n for n in tones if 62 <= n <= 81]
+        t = t0 + rng.uniform(0.3, 1.0)
+        while t < t0 + chord_len - 0.6:
+            n = int(rng.choice(tones))
+            add(t, felt_piano(note(n), 3.5, rng.uniform(0.22, 0.4), sr))
+            if bright and rng.random() < 0.5:
+                add(t + 0.02, music_box(note(n + 12), 2.0, 0.12, sr))
+            t += rng.uniform(1.0, 2.2) / melody_density
+    mix = reverb(buf, seconds=3.2, wet=0.38, sr=sr, seed=seed, loop=True, tone=2800)
+    return lowpass(mix, 7000, sr)
+
+
+# --- music ---------------------------------------------------------------------------------
+F = [53, 57, 60, 64]; C = [48, 55, 60, 64]; Am = [45, 52, 57, 60]; G = [43, 50, 55, 59]
+Dm = [50, 53, 57, 64]; Em = [52, 55, 59, 62]
+write_ogg('music_calm', render_track([F, C, Am, G, F, C, Dm, G, Am, Em, F, G], 6.0, 0.8, 11))
+write_ogg('music_bright', render_track([C, G, Am, F, C, G, F, C], 4.5, 1.6, 23, bright=True), peak=0.55)
+
+
+# --- effects ---------------------------------------------------------------------------------
+
+def scribble_loop():
+    n = SR * 2
+    tt = np.arange(n) / SR
+    grain = bandpass(noise(n, 'scr'), 1800, 6000)
+    strokes = 0.55 + 0.45 * np.abs(np.sin(2 * np.pi * 2.5 * tt) * np.sin(2 * np.pi * 0.9 * tt + 1.0))
+    crackle = (noise(n, 'crk') > 0.985) * noise(n, 'crk2')
+    x = grain * strokes + lowpass(crackle, 5000) * 0.6
+    return x
+
+
+def rub_loop():
+    n = SR * 2
+    tt = np.arange(n) / SR
+    x = bandpass(noise(n, 'rub'), 250, 1800) * (0.4 + 0.6 * np.abs(np.sin(2 * np.pi * 1.6 * tt)))
+    return x
+
+
+def tick(f, seconds, dec, vel=1.0):
+    tt = t_axis(seconds)
+    return np.sin(2 * np.pi * f * tt) * np.exp(-tt * dec) * np.clip(tt / 0.003, 0, 1) * vel
+
+
+def burst(seconds, seed, lo, hi, dec, attack=0.003):
+    tt = t_axis(seconds)
+    return bandpass(noise(len(tt), seed), lo, hi) * np.exp(-tt * dec) * np.clip(tt / attack, 0, 1)
+
+
+def chime(notes, gap, seconds, vel=0.6, box=True):
+    out = np.zeros(int(seconds * SR))
+    for k, n in enumerate(notes):
+        x = (music_box(note(n), seconds, vel, SR) if box else felt_piano(note(n), seconds, vel, SR))
+        a = int(k * gap * SR)
+        out[a:] += x[:len(out) - a]
+    return out
+
+
+def swell_noise(seconds, seed, lo, hi):
+    tt = t_axis(seconds)
+    return bandpass(noise(len(tt), seed), lo, hi) * np.sin(np.pi * tt / seconds) ** 1.5
+
+
+def creak(seconds, seed):
+    tt = t_axis(seconds)
+    f = 95 + 25 * np.sin(2 * np.pi * 1.3 * tt) + 8 * noise(len(tt), seed + 'j').cumsum() / len(tt) * 40
+    phase = 2 * np.pi * np.cumsum(f) / SR
+    saw = signal.sawtooth(phase) * (0.5 + 0.5 * (noise(len(tt), seed) > 0.2))
+    return lowpass(saw, 1200) * np.sin(np.pi * tt / seconds) * 0.6
+
+
+def mix(*xs):
+    n = max(len(x) for x in xs)
+    out = np.zeros(n)
+    for x in xs:
+        out[:len(x)] += x
+    return out
+
+
+fx = {
+    'scribble': (scribble_loop(), 0.35, False),
+    'rub': (rub_loop(), 0.35, False),
+    'step': (burst(0.06, 'step', 300, 2500, 90), 0.25, False),
+    'jump': (mix(tick(330, 0.18, 14), 0.5 * tick(495, 0.18, 16)), 0.35, True),
+    'land': (mix(burst(0.12, 'land', 120, 1500, 35), tick(110, 0.12, 30, 0.6)), 0.4, False),
+    'poof': (lowpass(burst(0.5, 'poof', 200, 3000, 7, 0.02), 2500), 0.45, True),
+    'pop': (mix(tick(620, 0.12, 30), tick(930, 0.1, 40, 0.4)), 0.35, False),
+    'paper_pop': (mix(burst(0.15, 'pp', 600, 4000, 30) * 0.6, tick(520, 0.15, 25, 0.5)), 0.3, False),
+    'crumple': (mix(*[np.pad(burst(0.05, 'c%d' % k, 800, 5000, 80), (int(k * 0.035 * SR), 0)) for k in range(8)]), 0.35, False),
+    'bump': (mix(tick(140, 0.15, 30), burst(0.08, 'bump', 100, 900, 40) * 0.5), 0.4, False),
+    'book_open': (mix(swell_noise(1.2, 'book', 150, 2200), np.pad(creak(0.6, 'bk'), (int(0.2 * SR), 0)) * 0.5), 0.55, True),
+    'pencil_line': (mix(scribble_loop()[:int(0.25 * SR)] * np.linspace(1, 0, int(0.25 * SR)) * 0.5, chime([67, 74], 0.09, 0.8, 0.5)), 0.45, True),
+    'erase': (mix(rub_loop()[:int(0.4 * SR)] * np.linspace(1, 0, int(0.4 * SR)), chime([72], 0, 0.4, 0.2)), 0.4, True),
+    'crumble': (mix(*[np.pad(burst(0.06, 'cb%d' % k, 1500, 6000, 70), (int(k * 0.05 * SR), 0)) for k in range(10)]), 0.3, False),
+    'dry': (bandpass(noise(int(0.25 * SR), 'dry'), 2000, 5000) * np.linspace(1, 0, int(0.25 * SR)) ** 2 * 0.6, 0.25, False),
+    'wobble': (np.sin(2 * np.pi * 160 * t_axis(0.5) + 3 * np.sin(2 * np.pi * 7 * t_axis(0.5))) * np.exp(-t_axis(0.5) * 6), 0.3, False),
+    'drop': (chime([84, 91], 0.07, 1.2, 0.6), 0.45, True),
+    'absorb': (chime([76, 79, 83, 88], 0.06, 1.0, 0.4), 0.4, True),
+    'bloom': (chime([72, 76, 79, 83, 84], 0.11, 1.8, 0.45, box=False), 0.5, True),
+    'click': (mix(tick(900, 0.05, 120), tick(180, 0.2, 25, 0.6)), 0.4, False),
+    'gate': (mix(creak(1.4, 'gate'), np.pad(chime([60, 67, 72, 76], 0.15, 1.2, 0.35, box=False), (int(0.5 * SR), 0))), 0.55, True),
+    'orb': (chime([67, 71, 74, 79, 83], 0.12, 2.2, 0.4, box=False), 0.5, True),
+    'restore': (chime([60, 64, 67, 72, 76, 79, 84], 0.28, 3.0, 0.4, box=False), 0.55, True),
+    'wind': (swell_noise(3.0, 'wind', 150, 1200) * (0.7 + 0.3 * np.sin(2 * np.pi * 0.7 * t_axis(3.0))), 0.45, True),
+    'page_flip': (swell_noise(0.7, 'flip', 400, 4000) * (1 + 0.6 * np.sin(2 * np.pi * 9 * t_axis(0.7))), 0.45, True),
+    'rumble': (lowpass(noise(int(1.4 * SR), 'rumble'), 160) * np.sin(np.pi * t_axis(1.4) / 1.4) * (0.6 + 0.4 * np.sin(2 * np.pi * 7 * t_axis(1.4))), 0.5, False),
+    'dust': (swell_noise(1.2, 'dust', 300, 3000) * np.exp(-t_axis(1.2) * 1.5), 0.4, True),
+    'emerge': (mix(swell_noise(1.0, 'em', 600, 4000) * 0.6, chime([64, 69, 71], 0.25, 1.0, 0.25)), 0.4, True),
+    'scribble_in': (mix(scribble_loop()[:int(0.5 * SR)] * np.linspace(0.2, 1, int(0.5 * SR)), np.pad(chime([72], 0, 0.3, 0.3), (int(0.45 * SR), 0))), 0.35, False),
+}
+for name, (x, peak, wet) in fx.items():
+    x = np.asarray(x, dtype=np.float64)
+    if name not in ('scribble', 'rub'):  # loops must not fade at their ends
+        x = fade(x)
+    if wet:
+        x = reverb(x, seconds=1.2, wet=0.22, seed=name, tone=4000)
+    write_wav(name, lowpass(x, 7500), peak=peak)
+print('QALAM audio written:', len(fx), 'effects + 2 music loops')

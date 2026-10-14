@@ -1,6 +1,7 @@
 class_name GameAudio
 extends Node3D
-## Spatial one-shot cues and looping ambiences, all from the generated CC0 WAVs.
+## Spatial one-shot cues, looping ambiences and crossfaded music, all generated
+## by tools/generate_audio.py (original, CC0).
 
 var voices: Array[AudioStreamPlayer3D] = []
 var cursor: int = 0
@@ -19,8 +20,12 @@ func _ready() -> void:
 
 func _stream(cue: String) -> AudioStream:
 	if not _streams.has(cue):
-		var path := "res://assets/audio/" + cue + ".wav"
-		_streams[cue] = load(path) if ResourceLoader.exists(path) else null
+		_streams[cue] = null
+		for ext in [".ogg", ".wav"]:
+			var path: String = "res://assets/audio/" + cue + ext
+			if ResourceLoader.exists(path):
+				_streams[cue] = load(path)
+				break
 	return _streams[cue]
 
 
@@ -58,7 +63,7 @@ func attach_loop(cue: String, parent: Node3D, volume_db: float = -22.0) -> Audio
 
 # --- music: two players crossfading between looping tracks -------------------
 
-const MUSIC_DB := -14.0
+const MUSIC_DB := -19.0
 var _music: Array[AudioStreamPlayer] = []
 var _music_active: int = 0
 var _music_name: String = ""
@@ -71,7 +76,9 @@ func play_music(track: String) -> void:
 	var stream := _stream("music_" + track)
 	if stream == null:
 		return
-	if stream is AudioStreamWAV:
+	if stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true
+	elif stream is AudioStreamWAV:
 		var wav := stream as AudioStreamWAV
 		wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
 		wav.loop_begin = 0
