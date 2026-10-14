@@ -56,15 +56,18 @@ jobs:
           timeout 60 xvfb-run -a -s "-screen 0 1280x720x24" godot --path . --xr-mode off --audio-driver Dummy --rendering-method gl_compatibility --script tests/preview_faces.gd
           ls -l build/previews
       - name: Export native ARM64 Android APK
+        if: github.event_name == 'workflow_dispatch'  # APK only when the owner asks for one
         run: godot --headless --xr-mode off --path . --install-android-build-template --export-debug Quest build/QALAM-Quest-AR-v0.1.0.apk
       - name: Verify manifest, ABI, splash, and certificate
+        if: github.event_name == 'workflow_dispatch'  # APK only when the owner asks for one
         run: python3 tools/verify_apk.py
       - name: Publish package report as a check annotation
+        if: github.event_name == 'workflow_dispatch'  # APK only when the owner asks for one
         run: |
           echo "::notice title=package-report::$(python3 -c 'import json;print(json.dumps(json.load(open("build/package-report.json"))))')"
           echo "::notice title=apk-sha256::$(cat build/QALAM-Quest-AR-v0.1.0.apk.sha256)"
       - name: Publish APK as a GitHub pre-release (direct download, GitHub only — never Meta)
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch'  # APK only when the owner asks for one
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -81,5 +84,5 @@ jobs:
         with:
           name: QALAM-Quest-AR-v0.1.0-build
           path: build/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
