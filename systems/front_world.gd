@@ -397,7 +397,7 @@ func _tick_pencil(delta: float, stick: Vector2) -> void:
 	pencil_root.position = pencil_pos
 	var speed := Vector2(pencil_vel.x, pencil_vel.z).length()
 	if speed > 0.05:
-		pencil_root.rotation.y = lerp_angle(pencil_root.rotation.y, atan2(pencil_vel.x, pencil_vel.z), minf(1.0, delta * 10.0))
+		pencil_root.rotation.y = lerp_angle(pencil_root.rotation.y, atan2(-pencil_vel.x, -pencil_vel.z), minf(1.0, delta * 10.0))
 		# Wherever he runs, colour pours out round his tip.
 		paint(pencil_pos, PENCIL_PAINT_R, PENCIL_PAINT_RATE * delta * clampf(speed / PENCIL_SPEED, 0.4, 1.0), 1.0)
 		_doodle_t += delta
