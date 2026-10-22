@@ -1,7 +1,7 @@
 name: QALAM Quest APK
 on:
   push:
-    branches: ['qalam/**']
+    branches: [main]
     paths-ignore: ['docs/**', 'assets/models/original/**']
   workflow_dispatch:
 permissions:
@@ -29,13 +29,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
-          key: shadda-development-signing-v1
+          key: qalam-development-signing-v1
       - name: Create development signing key when absent
         shell: bash
         run: |
           mkdir -p "$HOME/.android"
           if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool -genkeypair -noprompt -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=SHADDA Development,O=ABODEN GAMES,C=SA'
+            keytool -genkeypair -noprompt -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=QALAM Development,O=ABODEN GAMES,C=SA'
           fi
       - name: Install verified Godot and OpenXR Vendors
         run: python3 tools/setup_ci.py
