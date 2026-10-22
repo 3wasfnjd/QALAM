@@ -1,6 +1,6 @@
 extends Node3D
 ## Boot sequence: OpenXR + passthrough, studio intro, then hands the frame
-## loop to BookWorld. Desktop "--preview" mode fakes the headset so CI can
+## loop to FrontWorld (the pencil against the Eraser on your floor). Desktop "--preview" mode fakes the headset so CI can
 ## render flat screenshots (which prove nothing about the Quest itself).
 
 const IntroClock = preload("res://systems/intro_clock.gd")
@@ -12,7 +12,7 @@ var head: XRCamera3D
 var studio: Sprite3D
 var controllers: Array[XRController3D] = []
 var aim_controllers: Array[XRController3D] = []
-var world: BookWorld
+var world: FrontWorld
 var sun: DirectionalLight3D
 var foreground: bool = true
 var positioned: bool = false
@@ -70,15 +70,15 @@ func _ready() -> void:
 		aim.pose = &"aim"
 		origin.add_child(aim)
 		aim_controllers.append(aim)
-	world = BookWorld.new()
+	world = FrontWorld.new()
 	add_child(world)
 	world.visible = false
 	xr = XRServer.find_interface("OpenXR") as OpenXRInterface
 	if preview:
 		environment.background_color = Color(0.36, 0.34, 0.31, 1.0)
 		get_viewport().transparent_bg = false
-		head.position = Vector3(0, 1.2, -0.04)
-		head.rotation_degrees.x = -36.0
+		head.position = Vector3(0, 1.45, 0.3)
+		head.rotation_degrees.x = -42.0
 		aim_controllers[0].position = Vector3(-0.36, 1.0, -0.12)
 		aim_controllers[0].rotation_degrees = Vector3(-35, 10, 0)
 		aim_controllers[1].position = Vector3(0.36, 1.0, -0.12)
@@ -181,9 +181,9 @@ func _recenter() -> void:
 
 
 ## Scripted desktop demo through the real game code (flat screenshots for
-## CI; they prove nothing about the headset): placing, the crack intro, drawing,
-## the colour drop, erasing, the ramp and ball, the gate, the Eraser and the
-## lasso, stairs, the ending and the new rift.
+## CI; they prove nothing about the headset): placing the area on the floor, the
+## pencil colouring, the Eraser rubbing grey, a crayon stroke, the lasso freeze,
+## the end of the round.
 var _pv_step: int = 0
 var _pv_t: float = 0.0
 var _pv_steps: Array = []
@@ -216,96 +216,29 @@ func _preview_input(delta: float, _triggers: Array) -> Vector2:
 
 func _preview_plan() -> Array:
 	var w := world
-	var P := BookWorld.Phase
 	return [
 		{"t": 0.5, "shot": "01_placing"},
 		{"t": 0.2, "then": func(): w.place_here()},
-		{"t": 0.8, "shot": "02_shake"},
-		{"t": 1.6, "shot": "03_opening_dust"},
-		{"t": 1.6, "shot": "04_popup"},
-		{"until": func(): return w._intro_beats_queued, "max": 4.0, "shot": "05_emerge"},
-		{"t": 4.0, "shot": "06_look_tree"},
-		{"until": func(): return w.phase == P.PLAYING, "max": 30.0},
-		{"t": 0.3, "shot": "07_points_across"},
-		{"t": 0.2, "then": func():
+		{"t": 0.6, "shot": "02_front_line"},
+		{"t": 2.5, "stick": Vector2(0.6, 0.8), "shot": "03_pencil_colours"},
+		{"t": 3.0, "stick": Vector2(1.0, -0.3), "shot": "04_pushing_the_line"},
+		{"t": 0.1, "then": func():
 			var pts := PackedVector3Array()
-			for k in range(14):
-				var u := k / 13.0
-				pts.append(Vector3(lerpf(-3.55, -2.4, u), 1.12 + sin(u * PI) * 0.12, 1.6 + sin(u * 4.0) * 0.05))
-			w._strokes[1] = pts
-			Sketch.build_tube(w._stroke_meshes[1], pts, 0.05, 5)
-			w.pens[1].drawing = true
-			aim_controllers[1].global_position = w.page.to_global(pts[pts.size() - 1]) + Vector3(0.02, 0.0, 0.14), "shot": "08_drawing"},
-		{"t": 0.3, "then": func():
-			w._strokes[1] = PackedVector3Array()
-			w._stroke_meshes[1].clear_surfaces()
-			w.pens[1].drawing = false
-			var raw := PackedVector3Array()
-			for k in range(20):
-				var u := k / 19.0
-				raw.append(Vector3(lerpf(-3.55, -1.65, u), 1.08 + sin(u * PI) * 0.1, 1.6 + sin(u * 4.0) * 0.05))
-			w.commit_path(raw)},
-		{"t": 1.6, "shot": "09_careful_step"},
-		{"until": func(): return not w.hero.scripted(), "max": 6.0},
-		{"until": func(): return w.light_taken, "max": 8.0, "stick": Vector2(1, 0)},
-		{"t": 0.6, "shot": "10_colour_drop"},
-		{"t": 2.0, "shot": "11_flower_blooms"},
-		{"until": func(): return w.hero.position.x > -0.3, "max": 6.0, "stick": Vector2(1, 0)},
-		{"t": 2.6, "shot": "12_erase_hint"},
+			for k in range(30):
+				var u := k / 29.0
+				pts.append(w.to_global(Vector3(lerpf(-0.9, 0.3, u), 0.01, 0.8 + sin(u * 6.0) * 0.12)))
+			for p in pts:
+				w._draw_point(1, w.to_local(p) - Vector3(0, 0.01, 0))
+			, "shot": "05_crayon_stroke"},
+		{"t": 0.1, "then": func(): w.finish_stroke(1)},
+		{"t": 3.0, "shot": "06_eraser_rubs"},
 		{"t": 0.1, "then": func():
-			var id: String = w.level.paths[0].id
-			(w.paths[id] as PathView).erase_amount = 0.6
-			(w.paths[id] as PathView).targeted = true, "shot": "13_erasing"},
-		{"t": 0.3, "then": func(): w.erase_path(w.level.paths[0].id)},
-		{"t": 0.8, "then": func():
-			var raw := PackedVector3Array()
-			for k in range(24):
-				var u := k / 23.0
-				var x := lerpf(-1.0, 1.8, u)
-				raw.append(Vector3(x, lerpf(2.2, 1.0, smoothstep(0.0, 1.0, u)), -1.15 - u * 0.1))
-			w.commit_path(raw), "shot": "14_ramp_drawn"},
-		{"t": 1.0, "shot": "15_ball_rolls"},
-		{"until": func(): return w.ball_caught, "max": 5.0},
-		{"t": 1.8, "shot": "16_gate_opens"},
-		{"until": func(): return w.eraser.active() and w.eraser.state != EraserEnemy.State.EMERGING, "max": 6.0},
-		{"t": 2.4, "shot": "16b_eraser_out"},
-		{"until": func(): return w.eraser.state == EraserEnemy.State.RUBBING, "max": 10.0},
-		{"t": 0.6, "shot": "16c_eraser_rubs"},
-		{"until": func(): return w.level.paths.is_empty(), "max": 6.0},
-		{"t": 0.1, "then": func():
-			var loop := PackedVector3Array()
-			for k in range(26):
-				var a := TAU * k / 24.0
-				loop.append(w.eraser.position + Vector3(cos(a) * 0.45, 0.15, sin(a) * 0.45))
-			w._strokes[1] = loop
-			Sketch.build_tube(w._stroke_meshes[1], loop, 0.05, 5), "shot": "16d_lasso"},
-		{"t": 0.1, "then": func():
-			w._strokes[1] = PackedVector3Array()
-			w._stroke_meshes[1].clear_surfaces()
-			var loop := PackedVector3Array()
-			for k in range(26):
-				var a := TAU * k / 24.0
-				loop.append(w.eraser.position + Vector3(cos(a) * 0.45, 0.15, sin(a) * 0.45))
-			w.commit_stroke(loop)},
-		{"t": 0.4, "shot": "16e_trapped"},
-		{"t": 0.2, "then": func():
-			if not w.level.paths.is_empty():
-				w.erase_path(w.level.paths[0].id)
-			w.hero.reset_to(Vector3(2.05, 1.0, 2.0))
-			var raw := PackedVector3Array()
-			for k in range(16):
-				var u := k / 15.0
-				raw.append(Vector3(lerpf(2.1, 3.95, u), lerpf(1.0, 1.5, u) + sin(u * PI) * 0.1, 2.0))
-			w.commit_path(raw)},
-		{"t": 1.2, "stick": Vector2(1, 0), "shot": "17_stairs"},
-		{"t": 0.1, "then": func():
-			w.hero.reset_to(Vector3(4.0, 2.5, -2.8))},
-		{"until": func(): return w.phase == P.ENDING, "max": 4.0, "stick": Vector2(1, 0)},
-		{"t": 1.4, "shot": "18_holds_orb"},
-		{"t": 3.0, "shot": "19_colour_wave"},
-		{"t": 3.0, "shot": "20_life_returns"},
-		{"t": 1.6, "shot": "21_next_page"},
-		{"t": 4.0, "shot": "22_chapter_two"},
+			var loop := FrontWorld._loop_points(w.eraser_pos, 0.25, 0.01)
+			w.commit_stroke(loop), "shot": "07_lasso_freeze"},
+		{"t": 2.0, "stick": Vector2(0.4, 0.2), "shot": "08_mid_round"},
+		{"t": 0.1, "then": func(): w.time_left = 0.05},
+		{"t": 1.5, "shot": "09_round_over"},
+		{"t": 2.0, "shot": "10_side_floods"},
 	]
 
 
@@ -313,7 +246,7 @@ func _capture(shot_name: String) -> void:
 	await RenderingServer.frame_post_draw
 	DirAccess.make_dir_recursive_absolute("res://build/previews")
 	get_viewport().get_texture().get_image().save_png("res://build/previews/%s.png" % shot_name)
-	print("preview shot %s: phase=%d hero=%s ink=%.2f paths=%d ball=%s caught=%s" % [shot_name, world.phase, str(world.hero.position.snapped(Vector3.ONE * 0.01)), world.level.ink, world.level.paths.size(), str(world.ball.position.snapped(Vector3.ONE * 0.01)), str(world.ball_caught)])
+	print("preview shot %s: phase=%d pencil=%s eraser=%s share=%.2f ink=%.2f frozen=%.1f" % [shot_name, world.phase, str(world.pencil_pos.snapped(Vector3.ONE * 0.01)), str(world.eraser_pos.snapped(Vector3.ONE * 0.01)), world.pencil_share, world.ink, world.freeze])
 
 
 func _stop(message: String) -> void:

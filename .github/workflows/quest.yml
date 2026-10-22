@@ -48,6 +48,8 @@ jobs:
         run: godot --headless --xr-mode off --path . --script tests/test_intro.gd
       - name: Test page one headless (collision, strokes, ink, respawn, full solve, replay)
         run: godot --headless --xr-mode off --audio-driver Dummy --path . --script tests/test_page.gd
+      - name: Test the front line headless (floor area, pencil vs Eraser, lasso, round end)
+        run: godot --headless --xr-mode off --audio-driver Dummy --path . --script tests/test_front.gd
       - name: Capture in-engine desktop previews (not a Quest capture)
         run: |
           sudo apt-get update -qq
