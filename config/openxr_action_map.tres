@@ -57,7 +57,7 @@ toplevel_paths = PackedStringArray("/user/hand/left", "/user/hand/right")
 
 [sub_resource type="OpenXRActionSet" id="game"]
 resource_name = "game"
-localized_name = "SHADDA"
+localized_name = "QALAM"
 actions = [SubResource("trigger"), SubResource("grip"), SubResource("grip_pose"), SubResource("aim_pose"), SubResource("haptic"), SubResource("ax_button"), SubResource("by_button"), SubResource("thumbstick"), SubResource("thumbstick_click")]
 
 [sub_resource type="OpenXRIPBinding" id="left_trigger"]

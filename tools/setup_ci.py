@@ -2,7 +2,7 @@ import hashlib, os, pathlib, shutil, urllib.request, zipfile
 import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-CACHE = pathlib.Path(os.environ.get('RUNNER_TEMP', '/tmp')) / 'shadda-deps'
+CACHE = pathlib.Path(os.environ.get('RUNNER_TEMP', '/tmp')) / 'qalam-deps'
 CACHE.mkdir(parents=True, exist_ok=True)
 VERSION = '4.7.2-stable'
 BASE = f'https://github.com/godotengine/godot-builds/releases/download/{VERSION}/'
