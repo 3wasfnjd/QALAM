@@ -3,9 +3,10 @@ extends Node3D
 ## The pencil the player holds in each hand (room scale, metres), pointing
 ## along the controller's aim. Its painted body shortens as the graphite runs
 ## low (blinking when nearly empty), so the ink meter needs no words. A small
-## floating icon above the hand teaches drawing (pencil) or erasing (eraser).
+## floating icon above the hand teaches drawing (pencil), erasing (eraser) or
+## trapping the Eraser in a drawn loop (a pink block inside a circle).
 
-enum Hint { NONE, DRAW, ERASE }
+enum Hint { NONE, DRAW, ERASE, LASSO }
 
 var ink_fraction: float = 1.0
 var drawing: bool = false
@@ -23,6 +24,7 @@ var _eraser_mat: ShaderMaterial
 var _glow: MeshInstance3D
 var _icon_draw: Node3D
 var _icon_erase: Node3D
+var _icon_lasso: Node3D
 var _time: float = 0.0
 
 
@@ -44,6 +46,7 @@ func _ready() -> void:
 	_glow = Sketch.sphere(0.006, Sketch.ink(Color(0.25, 0.25, 0.3, 0.6), true), self, 8, 4)
 	_icon_draw = _make_icon(false)
 	_icon_erase = _make_icon(true)
+	_icon_lasso = _make_lasso_icon()
 	_set_length(1.0)
 
 
@@ -77,6 +80,25 @@ func _make_icon(eraser: bool) -> Node3D:
 	return root
 
 
+## The lasso badge: a small pink eraser inside a hand-drawn loop.
+func _make_lasso_icon() -> Node3D:
+	var root := Node3D.new()
+	root.position = Vector3(0, 0.055, 0.02)
+	add_child(root)
+	var disc := Sketch.cylinder(0.019, 0.019, 0.001, Sketch.paper(Color(0.97, 0.95, 0.88)), root, 16)
+	disc.rotation.x = PI / 2.0
+	var loop := PackedVector3Array()
+	for i in range(27):
+		var a := TAU * i / 24.0
+		var r := 0.014 + 0.002 * sin(i * 1.7)
+		loop.append(Vector3(cos(a) * r, sin(a) * r, 0.003))
+	Sketch.tube(loop, 0.0014, Sketch.ink(Sketch.GRAPHITE), root)
+	var e := Sketch.box(Vector3(0.011, 0.007, 0.004), Sketch.paper(Sketch.PINK), root)
+	e.position.z = 0.003
+	root.visible = false
+	return root
+
+
 func _set_length(fraction: float) -> void:
 	var body_len := 0.025 + 0.1 * clampf(fraction, 0.0, 1.0)
 	_body.scale = Vector3(1, body_len, 1)
@@ -105,7 +127,7 @@ func _process(delta: float) -> void:
 	_body_mat.set_shader_parameter("glow_color", Color(1.0, 0.3, 0.2))
 	_eraser_mat.set_shader_parameter("glow", 0.6 if erasing else 0.0)
 	_eraser_mat.set_shader_parameter("glow_color", Color(1.0, 0.6, 0.7))
-	for pair in [[_icon_draw, Hint.DRAW], [_icon_erase, Hint.ERASE]]:
+	for pair in [[_icon_draw, Hint.DRAW], [_icon_erase, Hint.ERASE], [_icon_lasso, Hint.LASSO]]:
 		var icon: Node3D = pair[0]
 		icon.visible = hint == pair[1]
 		if icon.visible:

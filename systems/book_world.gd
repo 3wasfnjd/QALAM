@@ -1,18 +1,21 @@
 class_name BookWorld
 extends Node3D
-## "The last page" — the flow and rules of stage one. Visuals live in
-## StageView / PencilRig / PathView; rules in PageLevel; this file connects
+## Chapter one, "the crack" — the flow and rules. No book: a crack splits your
+## real table and a grey paper world rises out of it. Visuals live in StageView /
+## PencilRig / PathView / EraserEnemy; rules in PageLevel; this file connects
 ## input, story beats and puzzles.
 ##
-##  PLACING  the closed book follows your gaze; stick ↑↓ = table height;
-##           trigger or A/X sets it down
-##  INTRO    book shakes, opens, paper dust, world pops up, the tired pencil
-##           steps out of the page, looks around, sees a light, walks to the
-##           gap, looks at you and points across (A skips)
+##  PLACING  a hairline crack and four corner marks follow your gaze on the
+##           table; stick ↑↓ = table height; trigger or A/X sets it down
+##  INTRO    the table shakes, the crack tears open, paper and graphite dust,
+##           the world pops up out of it, the tired pencil climbs out, looks
+##           around, sees a light, walks to the gap, points across (A skips)
 ##  PLAYING  stick walks (push far = run once he has hope), A/X jumps,
-##           trigger draws a path, grip + point erases one, B/Y erases last
-##  ENDING   the green orb: colour floods out, life returns, the next page
-##           flips, "الصفحة الثانية"; A plays the page again
+##           trigger draws a path, grip + point erases one, B/Y erases last.
+##           After the gate opens the Eraser crawls out of the crack and rubs
+##           out your lines: draw a loop round it to trap it, or flick it off
+##  ENDING   the green orb: colour floods out, life returns, a new rift tears
+##           open in the air, "الفصل الثاني"; A plays the chapter again
 
 signal haptic(hand: int, amplitude: float, seconds: float)
 signal finished
@@ -28,6 +31,8 @@ const ERASE_TIME := 0.45
 const BALL_REST_RESET := 2.5
 const INTRO_POP_AT := 3.3
 const INTRO_EMERGE_AT := 4.9
+const ERASER_DELAY := 2.5        # after the gate opens
+const LASSO_CLOSE := 0.9         # a stroke whose ends meet this close is a loop
 
 var phase: int = Phase.PLACING
 var head: Node3D
@@ -38,6 +43,9 @@ var level: PageLevel
 var view: StageView
 var hero: PencilBody
 var ball: PaperBall
+var eraser: EraserEnemy
+var eraser_trapped: bool = false
+var _eraser_t: float = -1.0
 var page: Node3D
 var table_height: float = DEFAULT_TABLE
 var placed: bool = false
@@ -148,6 +156,18 @@ func new_game() -> void:
 		cue("poof", ball.global_position, -4.0)
 		_confetti.burst(ball.position, 14, [OLD_PAPER_COLOR, Sketch.PAPER_DARK], 1.5, 2.0))
 	ball.bumped.connect(func(s: float): cue("bump", ball.global_position, -12.0 + minf(s, 5.0)))
+	eraser = EraserEnemy.new()
+	page.add_child(eraser)
+	eraser.setup(level, view.crack_point(0.55))
+	eraser.rubbed.connect(func(id: String):
+		if paths.has(id):
+			erase_path(id)
+			hero.face(PencilRig.Face.SAD, 1.2))
+	eraser.knocked_off.connect(func():
+		cue("poof", eraser.global_position, -4.0)
+		_confetti.burst(eraser.position, 12, [Sketch.PINK, Color(0.36, 0.5, 0.82)], 1.4, 1.6))
+	eraser_trapped = false
+	_eraser_t = -1.0
 	crossed_gap = false
 	light_taken = false
 	erase_taught = false
@@ -273,6 +293,8 @@ func _step_sim(delta: float, move: Vector2, run: bool) -> void:
 		if ball.visible:
 			ball.simulate(dt)
 			_ball_rules(dt)
+		if eraser.state != EraserEnemy.State.GONE:
+			eraser.simulate(dt, hero)
 
 
 func _stick_to_page(stick: Vector2) -> Vector2:
@@ -296,10 +318,11 @@ func _tick_intro(_delta: float) -> void:
 	var open := clampf((t - 1.3) / 2.0, 0.0, 1.0)
 	view.set_closed(1.0 - smoothstep(0.0, 1.0, open))
 	if t > 1.3 and t - _delta <= 1.3:
-		cue("book_open", global_position)
+		cue("crumble", global_position, 2.0)
 	if t > 2.4 and t - _delta <= 2.4:
-		# Dust of paper and graphite puffs out as it opens.
-		_confetti.burst(Vector3(0, 0.6, 0), 60, [Color(0.75, 0.72, 0.66), Color(0.5, 0.5, 0.52), OLD_PAPER_COLOR], 2.2, 2.5)
+		# Paper and graphite dust puffs out all along the crack as it tears open.
+		for k in range(8):
+			_confetti.burst(view.crack_point(k / 7.0) + Vector3(0, 0.2, 0), 8, [Color(0.75, 0.72, 0.66), Color(0.5, 0.5, 0.52), OLD_PAPER_COLOR], 1.8, 2.4)
 		cue("dust", global_position, -4.0)
 	view.pop_progress((t - INTRO_POP_AT) * 1.4)
 	if t > INTRO_POP_AT and int((t - INTRO_POP_AT) * 8.0) != int((t - _delta - INTRO_POP_AT) * 8.0) and t < INTRO_POP_AT + 1.5:
@@ -441,9 +464,35 @@ func finish_stroke(i: int) -> Dictionary:
 	_stroke_ink[i] = 0.0
 	_stroke_meshes[i].clear_surfaces()
 	level.refund_ink(spent)
-	var result := commit_path(pts)
+	var result := commit_stroke(pts)
 	haptic.emit(i, 0.6 if result.ok else 0.3, 0.12 if result.ok else 0.2)
 	return result
+
+
+## A finished stroke: a closed loop round the Eraser traps it (the loop's graphite
+## comes back); anything else becomes a path. Public for tests and the preview.
+func commit_stroke(raw: PackedVector3Array) -> Dictionary:
+	if raw.size() >= 4 and raw[0].distance_to(raw[raw.size() - 1]) < LASSO_CLOSE and eraser.inside_loop(raw):
+		trap_eraser(raw)
+		return {"ok": false, "reason": "lasso", "trapped": true}
+	return commit_path(raw)
+
+
+## The loop tightens and the Eraser scribbles away into pink dust.
+func trap_eraser(loop: PackedVector3Array) -> void:
+	var at := eraser.position
+	eraser.trap()
+	eraser_trapped = true
+	_crumble(loop)
+	for k in range(10):
+		_confetti.burst(at + Vector3(0, 0.25, 0), 3, [Sketch.PINK, Color(0.98, 0.75, 0.78), Sketch.GRAPHITE], 1.8, 2.0)
+	cue("scribble", page.to_global(at), 2.0)
+	cue("poof", page.to_global(at), 0.0)
+	for pen in pens:
+		if pen.hint == DrawingPen.Hint.LASSO:
+			pen.hint = DrawingPen.Hint.NONE
+	hero.face(PencilRig.Face.HAPPY, 2.0)
+	hero.look_target = head
 
 
 ## Turns raw points into a path (public for tests and the preview). Spends ink.
@@ -662,19 +711,27 @@ func _catch_ball() -> void:
 	for k in range(14):
 		_confetti.burst(level.gate + Vector3(0, 2.6, _rng.randf_range(-0.9, 0.9)), 2, [Color(0.75, 0.72, 0.66), Color(0.6, 0.58, 0.55)], 0.3, 0.2)
 	zone_life_target[2] = 0.35
+	_eraser_t = 0.0
 	hero.face(PencilRig.Face.HAPPY, 2.0)
 	hero.look_target = page.to_global(level.gate + Vector3(0, 1.0, 0))
 
 
-## The player's hands can flick the ball directly.
+## The player's hands can flick the ball (and the Eraser) directly.
 func _tick_hands(delta: float) -> void:
 	for i in range(hands.size()):
 		var p := page.to_local(pens[i].tip_global())
 		var prev := _hand_prev[i]
 		_hand_prev[i] = p
-		if prev == Vector3.INF or delta <= 0.0 or ball.locked:
+		if prev == Vector3.INF or delta <= 0.0:
 			continue
 		var v := (p - prev) / delta
+		if eraser.active() and (eraser.position + Vector3(0, 0.2, 0) - p).length() < 0.45 and Vector2(v.x, v.z).length() > 1.0:
+			var fl := Vector2(v.x, v.z).limit_length(7.0)
+			eraser.push(Vector3(fl.x, 1.5, fl.y))
+			cue("bump", eraser.global_position, -4.0)
+			haptic.emit(i, 0.5, 0.08)
+		if ball.locked:
+			continue
 		if (ball.position - p).length() < PaperBall.RADIUS + 0.3 and Vector2(v.x, v.z).length() > 0.8:
 			var flat := Vector2(v.x, v.z).limit_length(5.0)
 			ball.push(Vector3(flat.x, 0, flat.y))
@@ -707,6 +764,23 @@ var zone_life_target: Dictionary = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
 
 
 func _tick_story(delta: float) -> void:
+	# The Eraser climbs out of the crack a little after the gate opens.
+	if _eraser_t >= 0.0:
+		_eraser_t += delta
+		if _eraser_t >= ERASER_DELAY:
+			_eraser_t = -1.0
+			eraser.emerge()
+			cue("rumble", view.crack.global_position, -4.0)
+			cue("emerge", page.to_global(eraser.home), 0.0)
+			var e_at := page.to_global(eraser.home + Vector3(0, 0.3, 0))
+			hero.queue([
+				{"do": "face", "face": PencilRig.Face.SURPRISED, "hold": 1.2},
+				{"do": "look", "at": e_at, "t": 1.0},
+				{"do": "look", "at": head, "t": 0.8},
+				{"do": "call", "fn": func():
+					for pen in pens:
+						pen.hint = DrawingPen.Hint.LASSO},
+			])
 	if not crossed_gap and hero.position.x > level.block("P2").min.x - 0.3 and hero.grounded:
 		crossed_gap = true
 	# The light: a drop of colour → into the pencil → into the wilted flower.
@@ -853,7 +927,7 @@ func _tick_ending(delta: float) -> void:
 	# Wind, the next page flips, he looks at you and points at it.
 	if t > 7.2 and t - delta <= 7.2:
 		cue("wind", global_position, 0.0)
-		hero.queue([{"do": "look", "at": view.back_pages[1].global_position + Vector3(0, 0.3, 0), "t": 2.0}])
+		hero.queue([{"do": "look", "at": view.rift.global_position, "t": 2.0}])
 	if t > 7.2 and t < 9.5:
 		if int(t * 20.0) != int((t - delta) * 20.0):
 			_confetti.burst(Vector3(-5.0, 2.5, _rng.randf_range(-2.5, 2.5)), 2, [OLD_PAPER_COLOR, Color(0.8, 0.78, 0.7)], 0.5, 0.4)
@@ -861,12 +935,12 @@ func _tick_ending(delta: float) -> void:
 			bit.v.x += delta * 6.0
 	var flip := 0.0
 	if t > 8.0:
-		flip = clampf((t - 8.0) / 0.8, 0.0, 1.0) if t < 10.2 else clampf(1.0 - (t - 10.2) / 0.9, 0.0, 1.0)
+		flip = clampf((t - 8.0) / 1.6, 0.0, 1.0)   # the rift stays open
 		if t - delta <= 8.0:
-			cue("page_flip", view.back_pages[1].global_position)
+			cue("crumble", view.rift.global_position, 2.0)
 	view.flip_page(flip)
 	if t > 11.2 and t - delta <= 11.2:
-		var pg := view.back_pages[1].global_position + Vector3(0, 0.25, 0)
+		var pg := view.rift.global_position
 		hero.queue([
 			{"do": "turn", "to": head, "t": 0.5},
 			{"do": "look", "at": head, "t": 0.8},
@@ -923,4 +997,4 @@ func restart() -> void:
 	view.pop_progress(100.0)
 	phase = Phase.INTRO
 	_phase_time = INTRO_EMERGE_AT - 0.5
-	cue("book_open", global_position)
+	cue("crumble", global_position)

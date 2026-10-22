@@ -181,8 +181,9 @@ func _recenter() -> void:
 
 
 ## Scripted desktop demo through the real game code (flat screenshots for
-## CI; they prove nothing about the headset): placing, the intro, drawing,
-## the colour drop, erasing, the ramp and ball, the gate, stairs, the ending.
+## CI; they prove nothing about the headset): placing, the crack intro, drawing,
+## the colour drop, erasing, the ramp and ball, the gate, the Eraser and the
+## lasso, stairs, the ending and the new rift.
 var _pv_step: int = 0
 var _pv_t: float = 0.0
 var _pv_steps: Array = []
@@ -266,8 +267,30 @@ func _preview_plan() -> Array:
 		{"t": 1.0, "shot": "15_ball_rolls"},
 		{"until": func(): return w.ball_caught, "max": 5.0},
 		{"t": 1.8, "shot": "16_gate_opens"},
+		{"until": func(): return w.eraser.active() and w.eraser.state != EraserEnemy.State.EMERGING, "max": 6.0},
+		{"t": 2.4, "shot": "16b_eraser_out"},
+		{"until": func(): return w.eraser.state == EraserEnemy.State.RUBBING, "max": 10.0},
+		{"t": 0.6, "shot": "16c_eraser_rubs"},
+		{"until": func(): return w.level.paths.is_empty(), "max": 6.0},
+		{"t": 0.1, "then": func():
+			var loop := PackedVector3Array()
+			for k in range(26):
+				var a := TAU * k / 24.0
+				loop.append(w.eraser.position + Vector3(cos(a) * 0.45, 0.15, sin(a) * 0.45))
+			w._strokes[1] = loop
+			Sketch.build_tube(w._stroke_meshes[1], loop, 0.05, 5), "shot": "16d_lasso"},
+		{"t": 0.1, "then": func():
+			w._strokes[1] = PackedVector3Array()
+			w._stroke_meshes[1].clear_surfaces()
+			var loop := PackedVector3Array()
+			for k in range(26):
+				var a := TAU * k / 24.0
+				loop.append(w.eraser.position + Vector3(cos(a) * 0.45, 0.15, sin(a) * 0.45))
+			w.commit_stroke(loop)},
+		{"t": 0.4, "shot": "16e_trapped"},
 		{"t": 0.2, "then": func():
-			w.erase_path(w.level.paths[0].id)
+			if not w.level.paths.is_empty():
+				w.erase_path(w.level.paths[0].id)
 			w.hero.reset_to(Vector3(2.05, 1.0, 2.0))
 			var raw := PackedVector3Array()
 			for k in range(16):
@@ -282,7 +305,7 @@ func _preview_plan() -> Array:
 		{"t": 3.0, "shot": "19_colour_wave"},
 		{"t": 3.0, "shot": "20_life_returns"},
 		{"t": 1.6, "shot": "21_next_page"},
-		{"t": 4.0, "shot": "22_page_two"},
+		{"t": 4.0, "shot": "22_chapter_two"},
 	]
 
 

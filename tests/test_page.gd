@@ -1,8 +1,9 @@
 extends SceneTree
-## Headless checks for "the last page": surfaces and drawn paths, ink that is
-## spent while drawing and returned by erasing, slopes the pencil can or cannot
-## walk, the ball's three ramp outcomes, the stairs that force erase-and-redraw,
-## and a full run through BookWorld from placing the book to the ending.
+## Headless checks for chapter one, "the crack": surfaces and drawn paths, ink that
+## is spent while drawing and returned by erasing, slopes the pencil can or cannot
+## walk, the ball's three ramp outcomes, the Eraser that rubs out lines and is
+## trapped in a drawn loop, the stairs that force erase-and-redraw, and a full run
+## through BookWorld from placing the crack on the table to the ending.
 func _initialize() -> void:
 	_run()
 
@@ -17,7 +18,7 @@ func _run() -> void:
 		printerr("FAIL: %d check(s) failed" % _failures)
 		quit(1)
 		return
-	print("PASS: last page — paths, ink, erase, slopes, teeter, scribble respawn, ramp (good/steep/flat), stairs loop, intro, light, gate, orb ending, replay")
+	print("PASS: chapter one — crack intro, paths, ink, erase, slopes, teeter, scribble respawn, ramp (good/steep/flat), the Eraser (rubs lines, lasso trap), stairs loop, light, gate, orb ending, rift, replay")
 	quit(0)
 
 
@@ -148,6 +149,14 @@ func _ramp_outcomes() -> void:
 	await process_frame
 
 
+func _loop(c: Vector3, r: float) -> PackedVector3Array:
+	var pts := PackedVector3Array()
+	for k in range(26):
+		var a := TAU * k / 24.0
+		pts.append(c + Vector3(cos(a) * r, 0.15, sin(a) * r))
+	return pts
+
+
 func _ramp(a: Vector3, b: Vector3, ease_out: bool) -> PackedVector3Array:
 	var pts := PackedVector3Array()
 	for k in range(24):
@@ -180,13 +189,15 @@ func _full_run() -> void:
 			w.tick(dt, stick, trig, grip)
 	_check(w.phase == BookWorld.Phase.PLACING)
 	tick.call(1.0, Vector2.ZERO, [0.0, 1.0])
-	_check(w.phase == BookWorld.Phase.INTRO, "trigger set the book down")
+	_check(w.phase == BookWorld.Phase.INTRO, "trigger set the crack down on the table")
+	_check(w.view.crack_open < 0.01, "the crack starts as a hairline")
 	# Let the intro play to the end (no skipping).
 	for i in range(72 * 30):
 		w.tick(dt, Vector2.ZERO, [0.0, 0.0], [0.0, 0.0])
 		if w.phase == BookWorld.Phase.PLAYING:
 			break
 	_check(w.phase == BookWorld.Phase.PLAYING, "the intro ends with control")
+	_check(w.view.crack_open > 0.99, "the crack tore open")
 	var hero := w.hero
 	_check(hero.position.distance_to(w.level.gap_edge) < 0.6 and hero.tired, "he waits at the gap, tired")
 	_check(w.pens[0].hint == DrawingPen.Hint.DRAW, "pencil icon on the hand")
@@ -249,9 +260,35 @@ func _full_run() -> void:
 		if w.ball_caught:
 			break
 	_check(w.ball_caught and w.level.gate_open, "ball on the switch opens the gate")
+	# The Eraser climbs out of the crack and rubs out the ramp (its graphite comes back).
+	var out := false
+	for i in range(72 * 6):
+		w.tick(dt, Vector2.ZERO, [0.0, 0.0], [0.0, 0.0])
+		if w.eraser.active() and w.eraser.state != EraserEnemy.State.EMERGING:
+			out = true
+			break
+	_check(out, "the Eraser crawled out of the crack")
 	tick.call(2.5)
+	_check(w.pens[1].hint == DrawingPen.Hint.LASSO, "lasso icon on the hand")
+	var ink_before := w.level.ink
+	var eaten := false
+	for i in range(72 * 15):
+		w.tick(dt, Vector2.ZERO, [0.0, 0.0], [0.0, 0.0])
+		if w.level.paths.is_empty():
+			eaten = true
+			break
+	_check(eaten and w.level.ink > ink_before + 1.0, "the Eraser rubbed the ramp out (ink %.2f)" % w.level.ink)
+	# A loop that does not surround it is just a path; one round it traps it.
+	var miss := w.commit_stroke(_loop(w.eraser.position + Vector3(2.5, 0, 0), 0.4))
+	_check(not miss.get("trapped", false), "a loop elsewhere does not trap it")
+	if miss.ok:
+		w.erase_path(miss.id)
+	var lasso := w.commit_stroke(_loop(w.eraser.position, 0.45))
+	_check(lasso.get("trapped", false) and w.eraser_trapped and not w.eraser.visible, "a loop round the Eraser traps it")
+	_check(is_equal_approx(w.level.ink, PageLevel.INK_MAX), "the loop's graphite came back")
+	_check(w.pens[1].hint == DrawingPen.Hint.NONE)
+	tick.call(1.0)
 	# Stairs: bridge, cross, erase behind, bridge again — three times.
-	w.erase_path(good.id)
 	hero.reset_to(Vector3(2.0, 1.0, 2.0))
 	var stairs := [
 		[Vector3(2.15, 1.05, 2.0), Vector3(3.9, 1.55, 2.0), Vector2(1, 0), "T1"],
@@ -282,9 +319,10 @@ func _full_run() -> void:
 	_check(w.phase == BookWorld.Phase.ENDING, "touching the green orb ends the page: %s" % str(hero.position))
 	tick.call(14.0)
 	_check(w.zone_life[0] > 0.9 and w.view.stream_flow > 0.9, "life and the stream returned")
-	_check(w.view.page_two_label.modulate.a > 0.9, "'الصفحة الثانية' is shown")
+	_check(w.view.rift_t > 0.99, "a new rift tore open in the air")
+	_check(w.view.page_two_label.modulate.a > 0.9 and w.view.page_two_label.text == "الفصل الثاني", "'الفصل الثاني' is shown")
 	w.on_button(&"ax_button", 0)
-	_check(w.phase == BookWorld.Phase.INTRO and w.level.paths.is_empty() and not w.ball_caught, "A plays the page again")
+	_check(w.phase == BookWorld.Phase.INTRO and w.level.paths.is_empty() and not w.ball_caught and not w.eraser_trapped and not w.eraser.visible, "A plays the chapter again")
 	root.queue_free()
 	await process_frame
 

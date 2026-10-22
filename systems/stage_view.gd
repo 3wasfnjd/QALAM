@@ -1,16 +1,26 @@
 class_name StageView
 extends Node3D
-## Everything you SEE on the last page — book, stand, cliffs, props, effects —
-## built from simple shapes in page units. BookWorld drives it through a few
+## Everything you SEE in chapter one — the crack in your table, the paper world that
+## rises out of it, props, effects — built from simple shapes in page units. BookWorld drives it through a few
 ## methods (open, pop, bloom, gate, restore…); none of the rules live here, so
 ## each prop can later be replaced by a real 3D model.
 
-const COVER := Color(0.42, 0.29, 0.19)
 const OLD_PAPER := Color(0.92, 0.87, 0.74)
 
 var level: PageLevel
 var zones: Dictionary = {}
-var left_half: Node3D
+var corner_marks: Node3D
+var crack: Node3D
+var crack_spine := PackedVector3Array()
+var crack_mesh: ImmediateMesh
+var crack_mat: ShaderMaterial
+var crack_lips: Array[ImmediateMesh] = []
+var crack_open: float = 0.0
+var rift: Node3D
+var rift_mesh: ImmediateMesh
+var rift_mat: ShaderMaterial
+var rift_glimpse: Node3D
+var rift_t: float = 0.0
 var popups: Array = []            # {node, delay}
 var dead_tree: Node3D
 var leaves: Array[Node3D] = []
@@ -31,7 +41,6 @@ var switch_mat: ShaderMaterial
 var switch_pressed: bool = false
 var orb: Node3D
 var orb_mat: ShaderMaterial
-var back_pages: Array[Node3D] = []
 var page_two_label: Label3D
 var butterflies: Array = []
 var _time: float = 0.0
@@ -42,122 +51,161 @@ func build(page: PageLevel, zone_registry: Dictionary) -> void:
 	level = page
 	zones = zone_registry
 	_rng.seed = 1405
-	_build_stand_and_book()
-	_build_back_pages()
+	_build_table_marks()
+	_build_crack()
+	_build_rift()
 	_build_blocks()
 	_build_props()
 
 
-# --- book -----------------------------------------------------------------------------
+# --- your table ------------------------------------------------------------------------
+# No book and no board: the paper world rises straight out of a crack in your real
+# table. Only a shadow catcher (so the paper casts shadows on the real wood) and four
+# faint pencil corner marks show where the play area is.
 
-func _build_stand_and_book() -> void:
-	# A small wooden board the book rests on.
-	var board := Sketch.box(Vector3(12.6, 0.35, 8.4), Sketch.paper(Color(0.52, 0.36, 0.22)), self)
-	board.position = Vector3(0, -0.82, 0)
-	Sketch.sketch_box_edges(Vector3(12.6, 0.35, 8.4), Vector3(0, -0.82, 0), 0.02, _rng, self)
-	var cover := Sketch.paper(COVER)
-	var paper := Sketch.paper(OLD_PAPER)
-	var edge := Sketch.paper(Color(0.8, 0.72, 0.56))
+func _build_table_marks() -> void:
 	var hx := PageLevel.BOOK_HALF.x
 	var hz := PageLevel.BOOK_HALF.y
-	var right := Node3D.new()
-	add_child(right)
-	Sketch.box(Vector3(hx + 0.2, 0.12, hz * 2.0 + 0.3), cover, right).position = Vector3(hx * 0.5 + 0.1, -0.56, 0)
-	Sketch.box(Vector3(hx, 0.48, hz * 2.0), edge, right).position = Vector3(hx * 0.5, -0.25, 0)
-	Sketch.box(Vector3(hx, 0.02, hz * 2.0), paper, right).position = Vector3(hx * 0.5, -0.01, 0)
-	left_half = Node3D.new()
-	add_child(left_half)
-	Sketch.box(Vector3(hx + 0.2, 0.12, hz * 2.0 + 0.3), cover, left_half).position = Vector3(-hx * 0.5 - 0.1, -0.56, 0)
-	Sketch.box(Vector3(hx, 0.48, hz * 2.0), edge, left_half).position = Vector3(-hx * 0.5, -0.25, 0)
-	Sketch.box(Vector3(hx, 0.02, hz * 2.0), paper, left_half).position = Vector3(-hx * 0.5, -0.01, 0)
-	Sketch.cylinder(0.2, 0.2, hz * 2.0 + 0.3, cover, self).rotation.x = PI / 2.0
-	# Worn cover: scratches, torn corners, and a faded drawing of a pencil
-	# (on the outside face, which is on top while the book is closed).
-	var scratch := Sketch.ink(Color(0.3, 0.2, 0.13))
-	for i in range(16):
-		var x := _rng.randf_range(-hx, -0.4)
-		var z := _rng.randf_range(-hz, hz)
-		var a := _rng.randf() * TAU
-		var l := _rng.randf_range(0.2, 0.7)
-		Sketch.tube(PackedVector3Array([Vector3(x, -0.625, z), Vector3(x + cos(a) * l, -0.625, z + sin(a) * l)]), 0.012, scratch, left_half)
-	var torn := Sketch.paper(Color(0.3, 0.2, 0.12))
-	for corner in [Vector3(-hx - 0.1, -0.56, hz + 0.15), Vector3(-hx - 0.1, -0.56, -hz - 0.15)]:
-		var t := Sketch.box(Vector3(0.7, 0.14, 0.7), torn, left_half)
-		t.position = corner
-		t.rotation.y = PI / 4.0
-	var faded := Sketch.ink(Color(0.55, 0.48, 0.38))
-	var cx := -hx * 0.5
-	var outline := PackedVector3Array([Vector3(cx - 0.35, -0.63, 1.6), Vector3(cx - 0.35, -0.63, -0.9), Vector3(cx, -0.63, -1.6), Vector3(cx + 0.35, -0.63, -0.9), Vector3(cx + 0.35, -0.63, 1.6), Vector3(cx - 0.35, -0.63, 1.6)])
-	Sketch.tube(outline, 0.03, faded, left_half)
-	Sketch.tube(PackedVector3Array([Vector3(cx - 0.35, -0.63, -0.9), Vector3(cx + 0.35, -0.63, -0.9)]), 0.025, faded, left_half)
-	Sketch.tube(PackedVector3Array([Vector3(cx - 0.35, -0.63, 1.2), Vector3(cx + 0.35, -0.63, 1.2)]), 0.025, faded, left_half)
-	# Ruled lines and a few doodles on the pages.
-	var ruled := Sketch.ink(Color(0.7, 0.74, 0.8))
-	for i in range(11):
-		var z := -hz + 0.3 + i * 0.6
-		Sketch.tube(PackedVector3Array([Vector3(-hx + 0.2, 0.004, z), Vector3(-0.35, 0.004, z)]), 0.01, ruled, left_half)
-		Sketch.tube(PackedVector3Array([Vector3(0.35, 0.004, z), Vector3(hx - 0.2, 0.004, z)]), 0.01, ruled, right)
-	var doodle := Sketch.ink(Color(0.5, 0.47, 0.43))
-	for i in range(18):
-		var x := _rng.randf_range(-hx + 0.3, hx - 0.3)
-		var z := _rng.randf_range(-hz + 0.3, hz - 0.3)
-		if absf(x) < 0.4:
-			continue
-		var pts := PackedVector3Array()
-		var ang := _rng.randf() * TAU
-		for k in range(6):
-			pts.append(Vector3(x + cos(ang) * k * 0.09, 0.006, z + sin(ang) * k * 0.09 + sin(k * 1.7) * 0.05))
-		Sketch.tube(pts, 0.013, doodle, left_half if x < 0.0 else right)
+	var catcher := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(hx * 2.0 + 2.0, hz * 2.0 + 2.0)
+	catcher.mesh = plane
+	var mat := ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode blend_mix, depth_draw_opaque, cull_back, shadow_to_opacity, specular_disabled;
+void fragment() { ALBEDO = vec3(0.05, 0.04, 0.04); ALPHA = 0.0; }
+"""
+	mat.shader = sh
+	catcher.material_override = mat
+	catcher.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	catcher.position.y = 0.002
+	add_child(catcher)
+	corner_marks = Node3D.new()
+	add_child(corner_marks)
+	var mark := Sketch.ink(Color(0.2, 0.2, 0.23, 0.7), true)
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			var c := Vector3(sx * hx, 0.01, sz * hz)
+			Sketch.tube(PackedVector3Array([c - Vector3(sx * 0.9, 0, 0), c, c - Vector3(0, 0, sz * 0.9)]), 0.025, mark, corner_marks)
 
 
-## 1 = shut, 0 = flat open.
+## The crack the world comes out of: a jagged split across the back of the play area,
+## graphite lips on both sides and a warm light deep inside. set_closed(1) = a hairline.
+func _build_crack() -> void:
+	crack = Node3D.new()
+	add_child(crack)
+	var spine := PackedVector3Array()
+	for k in range(15):
+		var u := k / 14.0
+		spine.append(Vector3(lerpf(-5.0, 3.4, u), 0.0, -3.0 + sin(u * 11.0) * 0.18 + (_rng.randf() - 0.5) * 0.22))
+	crack_spine = spine
+	var im := ImmediateMesh.new()
+	crack_mesh = im
+	crack_mat = ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+uniform float open = 0.0;
+void fragment() {
+	float core = 1.0 - abs(UV.y * 2.0 - 1.0);
+	vec3 deep = vec3(0.05, 0.04, 0.06);
+	vec3 warm = vec3(1.0, 0.82, 0.45);
+	ALBEDO = mix(deep, warm, smoothstep(0.55, 1.0, core) * open);
+}
+"""
+	crack_mat.shader = sh
+	var node := Sketch.mesh_node(im, crack_mat, crack)
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var lip := Sketch.ink(Sketch.GRAPHITE)
+	for side in [-1.0, 1.0]:
+		var edge := ImmediateMesh.new()
+		crack_lips.append(edge)
+		var e := Sketch.mesh_node(edge, lip, crack)
+		e.set_meta("side", side)
+		e.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	set_closed(1.0)
+
+
+## 1 = shut (a hairline crack), 0 = wide open.
 func set_closed(amount: float) -> void:
-	left_half.rotation.z = -PI * amount
-	position.x = -PageLevel.BOOK_HALF.x * 0.5 * smoothstep(0.0, 1.0, amount)
+	crack_open = 1.0 - clampf(amount, 0.0, 1.0)
+	var w := 0.04 + 0.42 * crack_open
+	crack_mesh.clear_surfaces()
+	crack_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var lips: Array = [PackedVector3Array(), PackedVector3Array()]
+	for k in range(crack_spine.size() - 1):
+		var a := crack_spine[k]
+		var b := crack_spine[k + 1]
+		var ends := 1.0 - absf(float(k) / (crack_spine.size() - 2) * 2.0 - 1.0)
+		var wa := w * (0.35 + 0.65 * sqrt(ends)) * (0.8 + 0.4 * sin(k * 2.3))
+		var nb := 1.0 - absf(float(k + 1) / (crack_spine.size() - 2) * 2.0 - 1.0)
+		var wb := w * (0.35 + 0.65 * sqrt(clampf(nb, 0.0, 1.0))) * (0.8 + 0.4 * sin((k + 1) * 2.3))
+		var side := Vector3(-(b - a).z, 0, (b - a).x).normalized()
+		var y := 0.006
+		var quad := [[a - side * wa, Vector2(0, 0)], [a + side * wa, Vector2(0, 1)], [b + side * wb, Vector2(1, 1)], [a - side * wa, Vector2(0, 0)], [b + side * wb, Vector2(1, 1)], [b - side * wb, Vector2(1, 0)]]
+		for v in quad:
+			crack_mesh.surface_set_uv(v[1])
+			crack_mesh.surface_add_vertex(v[0] + Vector3(0, y, 0))
+		lips[0].append(a - side * wa + Vector3(0, 0.02, 0))
+		lips[1].append(a + side * wa + Vector3(0, 0.02, 0))
+	crack_mesh.surface_end()
+	for i in range(2):
+		Sketch.build_tube(crack_lips[i], lips[i], 0.035, 4)
+	crack_mat.set_shader_parameter("open", crack_open)
 
 
 func shake(amount: float) -> void:
-	rotation = Vector3(sin(_time * 31.0) * 0.012, 0, sin(_time * 27.0) * 0.015) * amount
+	rotation = Vector3(sin(_time * 31.0) * 0.006, 0, sin(_time * 27.0) * 0.008) * amount
+	crack.position = Vector3(sin(_time * 53.0) * 0.03, 0, cos(_time * 47.0) * 0.03) * amount
 
 
-# --- distant pages ---------------------------------------------------------------------
+## A point inside the crack (page units), u in 0..1 along it.
+func crack_point(u: float) -> Vector3:
+	var f := clampf(u, 0.0, 1.0) * (crack_spine.size() - 1)
+	var k := mini(int(f), crack_spine.size() - 2)
+	return crack_spine[k].lerp(crack_spine[k + 1], f - k)
 
-func _build_back_pages() -> void:
-	var lines := Sketch.ink(Color(0.3, 0.3, 0.32))
-	for i in range(3):
-		var dark := Sketch.paper(Color(0.36, 0.35, 0.35) if i != 1 else Color(0.6, 0.58, 0.55))
-		dark.set_shader_parameter("wave_mask", 0.0)
-		dark.set_shader_parameter("life", 0.0)
-		var pivot := Node3D.new()
-		add_child(pivot)
-		pivot.position = Vector3(-2.2 + i * 2.6, -0.3, -PageLevel.BOOK_HALF.y - 1.2 - absf(i - 1) * 0.4)
-		pivot.rotation = Vector3(deg_to_rad(-16.0), deg_to_rad(-10.0 + i * 10.0), 0)
-		var h := 4.2 + (0.5 if i == 1 else 0.0)
-		var sheet := Sketch.box(Vector3(3.4, h, 0.05), dark, pivot)
-		sheet.position.y = h * 0.5
-		Sketch.sketch_box_edges(Vector3(3.4, h, 0.05), sheet.position, 0.02, _rng, pivot, Color(0.25, 0.25, 0.27))
-		_pop(pivot, 1.5 + i * 0.1)
-		# Faint lines of a world not yet drawn (front face).
-		if i != 1:
-			for k in range(4):
-				var y := 0.8 + k * 0.9
-				Sketch.tube(PackedVector3Array([Vector3(-1.4, y, 0.04), Vector3(-0.5, y + 0.3, 0.04), Vector3(0.3, y - 0.1, 0.04), Vector3(1.4, y + 0.2, 0.04)]), 0.02, lines, pivot)
-		back_pages.append(pivot)
-	# The next page that flips forward at the end: its face shows a bigger land.
-	var flip := back_pages[1]
+
+# --- the next crack (end of the chapter) -------------------------------------------------
+# A second rift tears open in the air behind the play area, a glimpse of the next
+# world inside it, and the chapter title above.
+
+func _build_rift() -> void:
+	rift = Node3D.new()
+	add_child(rift)
+	rift.position = Vector3(0.4, 3.4, -PageLevel.BOOK_HALF.y - 1.0)
+	rift.rotation.x = deg_to_rad(-8.0)
+	rift_mesh = ImmediateMesh.new()
+	rift_mat = ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+uniform float open = 0.0;
+void fragment() {
+	float core = 1.0 - abs(UV.x * 2.0 - 1.0);
+	vec3 sky = mix(vec3(0.98, 0.93, 0.78), vec3(0.62, 0.82, 0.95), UV.y);
+	ALBEDO = mix(vec3(0.05, 0.04, 0.06), sky, smoothstep(0.2, 0.9, core) * open);
+}
+"""
+	rift_mat.shader = sh
+	var n := Sketch.mesh_node(rift_mesh, rift_mat, rift)
+	n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	rift_glimpse = Node3D.new()
+	rift.add_child(rift_glimpse)
 	var land := Sketch.ink(Color(0.18, 0.18, 0.2))
 	var hills := PackedVector3Array()
-	for k in range(13):
-		var x := -1.5 + k * 0.25
-		hills.append(Vector3(x, 1.4 + sin(k * 1.3) * 0.4 + (0.7 if k == 6 else 0.0), 0.05))
-	Sketch.tube(hills, 0.04, land, flip)
-	var castle := PackedVector3Array([Vector3(0.5, 1.9, 0.05), Vector3(0.5, 3.2, 0.05), Vector3(0.75, 3.6, 0.05), Vector3(1.0, 3.2, 0.05), Vector3(1.0, 1.9, 0.05)])
-	Sketch.tube(castle, 0.035, land, flip)
-	for k in range(4):
-		var x := -1.3 + k * 0.35
-		Sketch.tube(PackedVector3Array([Vector3(x, 1.6, 0.05), Vector3(x, 2.2, 0.05), Vector3(x + 0.15, 2.5, 0.05)]), 0.03, land, flip)
+	for k in range(9):
+		hills.append(Vector3(-0.5 + k * 0.125, -0.9 + sin(k * 1.3) * 0.18 + (0.35 if k == 4 else 0.0), 0.04))
+	Sketch.tube(hills, 0.025, land, rift_glimpse)
+	var tower := PackedVector3Array([Vector3(0.15, -0.6, 0.04), Vector3(0.15, 0.3, 0.04), Vector3(0.28, 0.55, 0.04), Vector3(0.41, 0.3, 0.04), Vector3(0.41, -0.6, 0.04)])
+	Sketch.tube(tower, 0.022, land, rift_glimpse)
+	rift_glimpse.visible = false
 	page_two_label = Label3D.new()
-	page_two_label.text = "الصفحة الثانية"
+	page_two_label.text = "الفصل الثاني"
 	page_two_label.font = load("res://assets/fonts/BalooBhaijaan2-Arabic.ttf")
 	page_two_label.font_size = 96
 	page_two_label.pixel_size = 0.0075
@@ -166,14 +214,38 @@ func _build_back_pages() -> void:
 	page_two_label.outline_modulate = Color(0.97, 0.94, 0.85, 0.0)
 	page_two_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	page_two_label.no_depth_test = true
-	page_two_label.position = Vector3(0.4, 4.6, -PageLevel.BOOK_HALF.y - 0.6)
+	page_two_label.position = rift.position + Vector3(0, 2.2, 0.4)
 	add_child(page_two_label)
+	flip_page(0.0)
 
 
-## 0 = resting behind the book, 1 = flipped toward the player.
+## 0 = no rift, 1 = torn wide open (the ending's "next page").
 func flip_page(t: float) -> void:
-	var p := back_pages[1]
-	p.rotation.x = lerpf(deg_to_rad(-16.0), deg_to_rad(38.0), t)
+	rift_t = clampf(t, 0.0, 1.0)
+	rift_mesh.clear_surfaces()
+	rift.visible = rift_t > 0.001
+	if not rift.visible:
+		return
+	var h := 2.6 * smoothstep(0.0, 0.5, rift_t)
+	var w := 0.08 + 0.75 * smoothstep(0.25, 1.0, rift_t)
+	rift_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := 12
+	for k in range(n):
+		var v0 := float(k) / n
+		var v1 := float(k + 1) / n
+		var y0 := (v0 - 0.5) * h
+		var y1 := (v1 - 0.5) * h
+		var w0 := w * sin(v0 * PI) * (0.75 + 0.5 * absf(sin(k * 2.1)))
+		var w1 := w * sin(v1 * PI) * (0.75 + 0.5 * absf(sin((k + 1) * 2.1)))
+		var j0 := sin(k * 1.9) * 0.1
+		var j1 := sin((k + 1) * 1.9) * 0.1
+		for v in [[Vector3(j0 - w0, y0, 0), Vector2(0, v0)], [Vector3(j0 + w0, y0, 0), Vector2(1, v0)], [Vector3(j1 + w1, y1, 0), Vector2(1, v1)], [Vector3(j0 - w0, y0, 0), Vector2(0, v0)], [Vector3(j1 + w1, y1, 0), Vector2(1, v1)], [Vector3(j1 - w1, y1, 0), Vector2(0, v1)]]:
+			rift_mesh.surface_set_uv(v[1])
+			rift_mesh.surface_add_vertex(v[0])
+	rift_mesh.surface_end()
+	rift_mat.set_shader_parameter("open", smoothstep(0.3, 1.0, rift_t))
+	rift_glimpse.visible = rift_t > 0.6
+	rift_glimpse.scale = Vector3.ONE * smoothstep(0.6, 1.0, rift_t)
 
 
 func show_page_two(alpha: float) -> void:
